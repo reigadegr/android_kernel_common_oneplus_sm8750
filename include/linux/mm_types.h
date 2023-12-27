@@ -995,7 +995,7 @@ struct mm_struct {
 		 */
 		atomic_long_t ksm_zero_pages;
 #endif /* CONFIG_KSM */
-#ifdef CONFIG_LRU_GEN
+#ifdef CONFIG_LRU_GEN_WALKS_MMU
 		struct {
 			/* this mm_struct is on lru_gen_mm_list */
 			struct list_head list;
@@ -1010,7 +1010,7 @@ struct mm_struct {
 			struct mem_cgroup *memcg;
 #endif
 		} lru_gen;
-#endif /* CONFIG_LRU_GEN */
+#endif /* CONFIG_LRU_GEN_WALKS_MMU */
 
 		ANDROID_KABI_RESERVE(1);
 		ANDROID_BACKPORT_RESERVE(1);
@@ -1051,6 +1051,10 @@ struct lru_gen_mm_list {
 	spinlock_t lock;
 };
 
+#endif /* CONFIG_LRU_GEN */
+
+#ifdef CONFIG_LRU_GEN_WALKS_MMU
+
 void lru_gen_add_mm(struct mm_struct *mm);
 void lru_gen_del_mm(struct mm_struct *mm);
 #ifdef CONFIG_MEMCG
@@ -1076,7 +1080,7 @@ static inline void lru_gen_use_mm(struct mm_struct *mm)
 	WRITE_ONCE(mm->lru_gen.bitmap, -1);
 }
 
-#else /* !CONFIG_LRU_GEN */
+#else /* !CONFIG_LRU_GEN_WALKS_MMU */
 
 static inline void lru_gen_add_mm(struct mm_struct *mm)
 {
@@ -1100,7 +1104,7 @@ static inline void lru_gen_use_mm(struct mm_struct *mm)
 {
 }
 
-#endif /* CONFIG_LRU_GEN */
+#endif /* CONFIG_LRU_GEN_WALKS_MMU */
 
 struct vma_iterator {
 	struct ma_state mas;
