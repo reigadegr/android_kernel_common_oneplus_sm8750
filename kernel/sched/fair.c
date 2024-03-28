@@ -10297,7 +10297,7 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 
 		/* Overload indicator is only updated at root domain */
 		if (balancing_at_rd && nr_running > 1)
-			*sg_status |= SG_OVERLOAD;
+			*sg_status |= SG_OVERLOADED;
 
 #ifdef CONFIG_NUMA_BALANCING
 		/* Only fbq_classify_group() uses this to classify NUMA groups */
@@ -10314,7 +10314,7 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 			if (sgs->group_misfit_task_load < rq->misfit_task_load) {
 				sgs->group_misfit_task_load = rq->misfit_task_load;
 				sgs->group_misfit_reason = rq->misfit_reason;
-				*sg_status |= SG_OVERLOAD;
+				*sg_status |= SG_OVERLOADED;
 			}
 		} else if ((env->idle != CPU_NOT_IDLE) &&
 			   sched_reduced_capacity(rq, env->sd)) {
@@ -10999,7 +10999,7 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
 
 	if (!env->sd->parent) {
 		/* update overload indicator if we are at root domain */
-		set_rd_overloaded(env->dst_rq->rd, sg_status & SG_OVERLOAD);
+		set_rd_overloaded(env->dst_rq->rd, sg_status & SG_OVERLOADED);
 
 		/* Update over-utilization (tipping point, U >= 0) indicator */
 		set_rd_overutilized_status(env->dst_rq->rd,
