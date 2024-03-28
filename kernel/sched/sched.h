@@ -845,10 +845,6 @@ struct perf_domain {
 	struct rcu_head rcu;
 };
 
-/* Scheduling group status flags */
-#define SG_OVERLOADED		0x1 /* More than one runnable task on a CPU. */
-#define SG_OVERUTILIZED		0x2 /* One or more CPUs are over-utilized. */
-
 /*
  * We add the notion of a root-domain which will be used to define per-domain
  * variables. Each exclusive cpuset essentially defines an island domain by
@@ -2589,9 +2585,8 @@ static inline void add_nr_running(struct rq *rq, unsigned count)
 	}
 
 #ifdef CONFIG_SMP
-	if (prev_nr < 2 && rq->nr_running >= 2) {
-		set_rd_overloaded(rq->rd, SG_OVERLOADED);
-	}
+	if (prev_nr < 2 && rq->nr_running >= 2)
+		set_rd_overloaded(rq->rd, 1);
 #endif
 
 	sched_update_tick_dependency(rq);
