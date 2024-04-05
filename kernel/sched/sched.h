@@ -571,11 +571,6 @@ struct cfs_rq {
 	unsigned int		forceidle_seq;
 	u64			min_vruntime_fi;
 #endif
-
-#ifndef CONFIG_64BIT
-	u64			min_vruntime_copy;
-#endif
-
 	struct rb_root_cached	tasks_timeline;
 
 	/*
