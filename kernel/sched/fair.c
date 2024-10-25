@@ -8662,10 +8662,10 @@ again:
 				update_curr(cfs_rq);
 			else
 				curr = NULL;
-
-			if (unlikely(check_cfs_rq_runtime(cfs_rq)))
-				goto again;
 		}
+
+		if (unlikely(check_cfs_rq_runtime(cfs_rq)))
+		    goto again;
 
 		se = pick_next_entity(rq, cfs_rq);
 		if (!se)
