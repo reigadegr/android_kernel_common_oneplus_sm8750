@@ -927,6 +927,26 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 }
 
 /*
+ * HACK, stash a copy of deadline at the point of pick in vlag,
+ * which isn't used until dequeue.
+ */
+static inline void set_protect_slice(struct sched_entity *se)
+{
+	se->vlag = se->deadline;
+}
+
+static inline bool protect_slice(struct sched_entity *se)
+{
+	return se->vlag == se->deadline;
+}
+
+static inline void cancel_protect_slice(struct sched_entity *se)
+{
+	if (protect_slice(se))
+		se->vlag = se->deadline + 1;
+}
+
+/*
  * Earliest Eligible Virtual Deadline First
  *
  * In order to provide latency guarantees for different request sizes
@@ -967,7 +987,7 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq)
 	 * until it gets a new slice. See the HACK in set_next_entity().
 	 */
 #if !defined(CONFIG_SCHED_BORE)
-	if (sched_feat(RUN_TO_PARITY) && curr && curr->vlag == curr->deadline)
+	if (sched_feat(RUN_TO_PARITY) && curr && protect_slice(curr))
 #else /* CONFIG_SCHED_BORE */
 	bool run_to_parity = likely(sched_bore) ?
 		sched_feat(RUN_TO_PARITY_BORE) : sched_feat(RUN_TO_PARITY);
@@ -1211,7 +1231,7 @@ static inline bool did_preempt_short(struct cfs_rq *cfs_rq, struct sched_entity 
 	// if (!sched_feat(PREEMPT_SHORT))
 		// return false;
 
-	if (curr->vlag == curr->deadline)
+	if (protect_slice(curr))
 		return false;
 
 	return !entity_eligible(cfs_rq, curr);
@@ -5648,11 +5668,8 @@ void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		update_stats_wait_end_fair(cfs_rq, se);
 		__dequeue_entity(cfs_rq, se);
 		update_load_avg(cfs_rq, se, UPDATE_TG);
-		/*
-		 * HACK, stash a copy of deadline at the point of pick in vlag,
-		 * which isn't used until dequeue.
-		 */
-		se->vlag = se->deadline;
+
+		set_protect_slice(se);
 	}
 
 	update_stats_curr_start(cfs_rq, se);
@@ -8801,8 +8818,15 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Preempt an idle entity in favor of a non-idle entity (and don't preempt
 	 * in the inverse case).
 	 */
-	if (cse_is_idle && !pse_is_idle)
+	if (cse_is_idle && !pse_is_idle) {
+		/*
+		 * When non-idle entity preempt an idle entity,
+		 * don't give idle entity slice protection.
+		 */
+		cancel_protect_slice(se);
 		goto preempt;
+	}
+
 	if (cse_is_idle != pse_is_idle)
 		return;
 
@@ -8829,8 +8853,8 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Note that even if @p does not turn out to be the most eligible
 	 * task at this moment, current's slice protection will be lost.
 	 */
-	if (do_preempt_short(cfs_rq, pse, se) && se->vlag == se->deadline)
-		se->vlag = se->deadline + 1;
+	if (do_preempt_short(cfs_rq, pse, se))
+		cancel_protect_slice(se);
 
 	/*
 	 * If @p has become the most eligible task, force preemption.
