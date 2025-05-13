@@ -862,17 +862,13 @@ KBUILD_CFLAGS	+= -fvectorize -funroll-loops -mllvm -polly \
 		   -mllvm -polly-invariant-load-hoisting \
 		   -mllvm -polly-vectorizer=stripmine
 
-ifeq ($(shell test $(CONFIG_CLANG_VERSION) -gt 130000; echo $$?),0)
-KBUILD_CFLAGS	+= -mllvm -polly-loopfusion-greedy=1 \
+KBUILD_CFLAGS += -mllvm -polly-loopfusion-greedy=1 \
 		   -mllvm -polly-reschedule=1 \
 		   -mllvm -polly-postopts=1 \
 		   -mllvm -polly-num-threads=0 \
 		   -mllvm -polly-omp-backend=LLVM \
 		   -mllvm -polly-scheduling=dynamic \
 		   -mllvm -polly-scheduling-chunksize=1
-else
-KBUILD_CFLAGS	+= -mllvm -polly-opt-fusion=max
-endif
 
 # Polly may optimise loops with dead paths beyound what the linker
 # can understand. This may negate the effect of the linker's DCE
@@ -2063,6 +2059,21 @@ $(extmod_prefix)compile_commands.json: scripts/clang-tools/gen_compile_commands.
 targets += $(extmod_prefix)compile_commands.json
 
 PHONY += clang-tidy clang-analyzer
+
+ifeq ($(call cc-option-yn, -mllvm -regalloc-enable-advisor=release),y)
+ifeq ($(call cc-option-yn,-mllvm -ml-inliner-model-selector=arm64-mixed),y)
+KBUILD_CLFLAGS  += -mllvm -regalloc-enable-advisor=release \
+		   -mllvm -enable-ml-inliner=release \
+                   -mllvm -ml-inliner-model-selector=arm64-mixed \
+		   -ml-inliner-skip-policy=if-caller-not-cold
+KBUILD_LDFLAGS  += -mllvm -enable-ml-inliner=release \
+                   -mllvm -ml-inliner-model-selector=arm64-mixed
+$(info --- MLGO Optimizations Activated!)
+endif
+endif
+
+# Enable hot cold split optimization
+KBUILD_CFLAGS   += -mllvm -hot-cold-split=true
 
 ifdef CONFIG_CC_IS_CLANG
 quiet_cmd_clang_tools = CHECK   $<
