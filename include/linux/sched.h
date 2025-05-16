@@ -73,9 +73,6 @@ struct task_delay_info;
 struct task_group;
 struct user_event_mm;
 
-#ifdef CONFIG_HMBIRD_SCHED
-#include <linux/sched/hmbird.h>
-#endif
 
 /*
  * Task state bitmask. NOTE! These bits are also
@@ -1925,51 +1922,6 @@ static inline int task_nice(const struct task_struct *p)
 	return PRIO_TO_NICE((p)->static_prio);
 }
 
-#ifdef CONFIG_HMBIRD_SCHED
-static inline bool task_is_top_task(struct task_struct *p)
-{
-	return (((struct hmbird_entity *)(p->android_oem_data1[HMBIRD_TS_IDX]))
-		->top_task_prop & TOP_TASK_BITS_MASK);
-}
-
-static inline int get_top_task_prop(struct task_struct *p)
-{
-	return get_hmbird_ts(p)->top_task_prop;
-}
-
-static inline int set_top_task_prop(struct task_struct *p, u64 set, u64 clear)
-{
-	if (set)
-		get_hmbird_ts(p)->top_task_prop |= set;
-	if (clear)
-		get_hmbird_ts(p)->top_task_prop &= ~clear;
-	return 0;
-}
-
-static inline void reset_top_task_prop(struct task_struct *p)
-{
-	get_hmbird_ts(p)->top_task_prop = 0;
-}
-
-static inline int hmbird_set_sched_prop(struct task_struct *p, unsigned long sp)
-{
-	if (get_hmbird_ts(p) == NULL)
-		return 0;
-
-	get_hmbird_ts(p)->sched_prop = sp;
-	return 0;
-}
-
-static inline unsigned long hmbird_get_sched_prop(struct task_struct *p)
-{
-	return get_hmbird_ts(p)->sched_prop;
-}
-
-static inline unsigned long hmbird_get_dsq_id(struct task_struct *p)
-{
-	return (get_hmbird_ts(p)->sched_prop & SCHED_PROP_DEADLINE_MASK);
-}
-#endif
 
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);
