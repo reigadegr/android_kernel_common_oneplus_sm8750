@@ -978,7 +978,7 @@ static struct sched_entity *__pick_eevdf(struct cfs_rq *cfs_rq)
 	}
 found:
 	if (!best || (curr && entity_before(curr, best)))
-		best = curr;
+		best = curr ? curr : se;
 
 	/* EEVDF search sched entity fail, so picking leftmost */
 	if (!best) {
