@@ -394,7 +394,7 @@ static int z_erofs_get_extent_compressedlen(struct z_erofs_maprecorder *m,
 out:
 	map->m_plen = erofs_pos(sb, m->compressedblks);
 	//#ifdef OPLUS_STORAGE_FS debug for bugid 7760993
-        WARN(!map->m_plen, "m_plen is 0 in out compressedblks:%u\n", m->compressedblks);
+    	WARN(!map->m_plen, "m_plen is 0 in out compressedblks:%u\n", m->compressedblks);
 	//#endif
 	return 0;
 err_bonus_cblkcnt:
@@ -727,7 +727,7 @@ int z_erofs_map_blocks_iter(struct inode *inode, struct erofs_map_blocks *map,
 
 	err = z_erofs_do_map_blocks(inode, map, flags);
 out:
-        if (err){
+    	if (err){
 		//#ifdef OPLUS_STORAGE_FS debug for bugid 7760993
 		erofs_err(inode->i_sb,"m_la %llu m_pa %llu m_llen %llu m_plen %llu m_flags 0%o err %d",
 		   map->m_la, map->m_pa,

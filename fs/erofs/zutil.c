@@ -178,11 +178,16 @@ struct page *__erofs_allocpage(struct page **pagepool, gfp_t gfp, bool tryrsv)
 	struct page *page = *pagepool;
 
 	if (page) {
-		DBG_BUGON(page_ref_count(page) != 1);
 		*pagepool = (struct page *)page_private(page);
-	} else {
-		page = alloc_page(gfp);
+	} else if (tryrsv && z_erofs_rsvbuf && z_erofs_rsvbuf->nrpages) {
+		spin_lock(&z_erofs_rsvbuf->lock);
+		if (z_erofs_rsvbuf->nrpages)
+			page = z_erofs_rsvbuf->pages[--z_erofs_rsvbuf->nrpages];
+		spin_unlock(&z_erofs_rsvbuf->lock);
 	}
+	if (!page)
+		page = alloc_page(gfp);
+	DBG_BUGON(page && page_ref_count(page) != 1);
 	return page;
 }
 
@@ -192,13 +197,21 @@ void erofs_release_pages(struct page **pagepool)
 		struct page *page = *pagepool;
 
 		*pagepool = (struct page *)page_private(page);
+		/* try to fill reserved global pool first */
+		if (z_erofs_rsvbuf && z_erofs_rsvbuf->nrpages <
+				z_erofs_rsv_nrpages) {
+			spin_lock(&z_erofs_rsvbuf->lock);
+			if (z_erofs_rsvbuf->nrpages < z_erofs_rsv_nrpages) {
+				z_erofs_rsvbuf->pages[z_erofs_rsvbuf->nrpages++]
+						= page;
+				spin_unlock(&z_erofs_rsvbuf->lock);
+				continue;
+			}
+			spin_unlock(&z_erofs_rsvbuf->lock);
+		}
 		put_page(page);
 	}
 }
-
-#ifdef CONFIG_EROFS_FS_ZIP
-/* global shrink count (for all mounted EROFS instances) */
-static atomic_long_t erofs_global_shrink_cnt;
 
 static bool erofs_workgroup_get(struct erofs_workgroup *grp)
 {
@@ -339,13 +352,6 @@ static unsigned long erofs_shrink_workstation(struct erofs_sb_info *sbi,
 	return freed;
 }
 
-/* protected by 'erofs_sb_list_lock' */
-static unsigned int shrinker_run_no;
-
-/* protects the mounted 'erofs_sb_list' */
-static DEFINE_SPINLOCK(erofs_sb_list_lock);
-static LIST_HEAD(erofs_sb_list);
-
 void erofs_shrinker_register(struct super_block *sb)
 {
 	struct erofs_sb_info *sbi = EROFS_SB(sb);
@@ -447,4 +453,3 @@ void erofs_exit_shrinker(void)
 {
 	unregister_shrinker(&erofs_shrinker_info);
 }
-#endif	/* !CONFIG_EROFS_FS_ZIP */
