@@ -45,9 +45,14 @@ static unsigned char default_operstate(const struct net_device *dev)
 		int iflink = dev_get_iflink(dev);
 		struct net_device *peer;
 
-		if (iflink == dev->ifindex)
+		/* If called from netdev_run_todo()/linkwatch_sync_dev(),
+		 * dev_net(dev) can be already freed, and RTNL is not held.
+		 */
+		if (dev->reg_state == NETREG_UNREGISTERED ||
+		    iflink == dev->ifindex)
 			return IF_OPER_DOWN;
 
+		ASSERT_RTNL();
 		peer = __dev_get_by_index(dev_net(dev), iflink);
 		if (!peer)
 			return IF_OPER_DOWN;
@@ -67,7 +72,7 @@ static void rfc2863_policy(struct net_device *dev)
 {
 	unsigned char operstate = default_operstate(dev);
 
-	if (operstate == dev->operstate)
+	if (operstate == READ_ONCE(dev->operstate))
 		return;
 
 	write_lock(&dev_base_lock);
@@ -87,7 +92,7 @@ static void rfc2863_policy(struct net_device *dev)
 		break;
 	}
 
-	dev->operstate = operstate;
+	WRITE_ONCE(dev->operstate, operstate);
 
 	write_unlock(&dev_base_lock);
 }
@@ -153,9 +158,9 @@ static void linkwatch_schedule_work(int urgent)
 	 * override the existing timer.
 	 */
 	if (test_bit(LW_URGENT, &linkwatch_flags))
-		mod_delayed_work(system_wq, &linkwatch_work, 0);
+		mod_delayed_work(system_unbound_wq, &linkwatch_work, 0);
 	else
-		schedule_delayed_work(&linkwatch_work, delay);
+		queue_delayed_work(system_unbound_wq, &linkwatch_work, delay);
 }
 
 

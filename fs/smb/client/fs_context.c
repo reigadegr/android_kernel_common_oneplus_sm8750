@@ -139,6 +139,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_u32("dir_mode", Opt_dirmode),
 	fsparam_u32("port", Opt_port),
 	fsparam_u32("min_enc_offload", Opt_min_enc_offload),
+	fsparam_u32("retrans", Opt_retrans),
 	fsparam_u32("esize", Opt_min_enc_offload),
 	fsparam_u32("bsize", Opt_blocksize),
 	fsparam_u32("rasize", Opt_rasize),
@@ -161,6 +162,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_string("username", Opt_user),
 	fsparam_string("pass", Opt_pass),
 	fsparam_string("password", Opt_pass),
+	fsparam_string("password2", Opt_pass2),
 	fsparam_string("ip", Opt_ip),
 	fsparam_string("addr", Opt_ip),
 	fsparam_string("domain", Opt_domain),
@@ -173,6 +175,7 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_string("vers", Opt_vers),
 	fsparam_string("sec", Opt_sec),
 	fsparam_string("cache", Opt_cache),
+	fsparam_string("reparse", Opt_reparse),
 
 	/* Arguments that should be ignored */
 	fsparam_flag("guest", Opt_ignore),
@@ -295,6 +298,35 @@ cifs_parse_cache_flavor(struct fs_context *fc, char *value, struct smb3_fs_conte
 	return 0;
 }
 
+static const match_table_t reparse_flavor_tokens = {
+	{ Opt_reparse_default,	"default" },
+	{ Opt_reparse_nfs,	"nfs" },
+	{ Opt_reparse_wsl,	"wsl" },
+	{ Opt_reparse_err,	NULL },
+};
+
+static int parse_reparse_flavor(struct fs_context *fc, char *value,
+				struct smb3_fs_context *ctx)
+{
+	substring_t args[MAX_OPT_ARGS];
+
+	switch (match_token(value, reparse_flavor_tokens, args)) {
+	case Opt_reparse_default:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
+		break;
+	case Opt_reparse_nfs:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_NFS;
+		break;
+	case Opt_reparse_wsl:
+		ctx->reparse_type = CIFS_REPARSE_TYPE_WSL;
+		break;
+	default:
+		cifs_errorf(fc, "bad reparse= option: %s\n", value);
+		return 1;
+	}
+	return 0;
+}
+
 #define DUP_CTX_STR(field)						\
 do {									\
 	if (ctx->field) {						\
@@ -314,6 +346,7 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	new_ctx->nodename = NULL;
 	new_ctx->username = NULL;
 	new_ctx->password = NULL;
+	new_ctx->password2 = NULL;
 	new_ctx->server_hostname = NULL;
 	new_ctx->domainname = NULL;
 	new_ctx->UNC = NULL;
@@ -326,6 +359,7 @@ smb3_fs_context_dup(struct smb3_fs_context *new_ctx, struct smb3_fs_context *ctx
 	DUP_CTX_STR(prepath);
 	DUP_CTX_STR(username);
 	DUP_CTX_STR(password);
+	DUP_CTX_STR(password2);
 	DUP_CTX_STR(server_hostname);
 	DUP_CTX_STR(UNC);
 	DUP_CTX_STR(source);
@@ -854,12 +888,37 @@ do {									\
 	cifs_sb->ctx->field = NULL;					\
 } while (0)
 
+int smb3_sync_session_ctx_passwords(struct cifs_sb_info *cifs_sb, struct cifs_ses *ses)
+{
+	if (ses->password &&
+	    cifs_sb->ctx->password &&
+	    strcmp(ses->password, cifs_sb->ctx->password)) {
+		kfree_sensitive(cifs_sb->ctx->password);
+		cifs_sb->ctx->password = kstrdup(ses->password, GFP_KERNEL);
+		if (!cifs_sb->ctx->password)
+			return -ENOMEM;
+	}
+	if (ses->password2 &&
+	    cifs_sb->ctx->password2 &&
+	    strcmp(ses->password2, cifs_sb->ctx->password2)) {
+		kfree_sensitive(cifs_sb->ctx->password2);
+		cifs_sb->ctx->password2 = kstrdup(ses->password2, GFP_KERNEL);
+		if (!cifs_sb->ctx->password2) {
+			kfree_sensitive(cifs_sb->ctx->password);
+			cifs_sb->ctx->password = NULL;
+			return -ENOMEM;
+		}
+	}
+	return 0;
+}
+
 static int smb3_reconfigure(struct fs_context *fc)
 {
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
 	struct dentry *root = fc->root;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(root->d_sb);
 	struct cifs_ses *ses = cifs_sb_master_tcon(cifs_sb)->ses;
+	char *new_password = NULL, *new_password2 = NULL;
 	bool need_recon = false;
 	int rc;
 
@@ -879,12 +938,63 @@ static int smb3_reconfigure(struct fs_context *fc)
 	STEAL_STRING(cifs_sb, ctx, UNC);
 	STEAL_STRING(cifs_sb, ctx, source);
 	STEAL_STRING(cifs_sb, ctx, username);
+
 	if (need_recon == false)
 		STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
 	else  {
-		kfree_sensitive(ses->password);
-		ses->password = kstrdup(ctx->password, GFP_KERNEL);
+		if (ctx->password) {
+			new_password = kstrdup(ctx->password, GFP_KERNEL);
+			if (!new_password)
+				return -ENOMEM;
+		} else
+			STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
 	}
+
+	/*
+	 * if a new password2 has been specified, then reset it's value
+	 * inside the ses struct
+	 */
+	if (ctx->password2) {
+		new_password2 = kstrdup(ctx->password2, GFP_KERNEL);
+		if (!new_password2) {
+			kfree_sensitive(new_password);
+			return -ENOMEM;
+		}
+	} else
+		STEAL_STRING_SENSITIVE(cifs_sb, ctx, password2);
+
+	/*
+	 * we may update the passwords in the ses struct below. Make sure we do
+	 * not race with smb2_reconnect
+	 */
+	mutex_lock(&ses->session_mutex);
+
+	/*
+	 * smb2_reconnect may swap password and password2 in case session setup
+	 * failed. First get ctx passwords in sync with ses passwords. It should
+	 * be okay to do this even if this function were to return an error at a
+	 * later stage
+	 */
+	rc = smb3_sync_session_ctx_passwords(cifs_sb, ses);
+	if (rc) {
+		mutex_unlock(&ses->session_mutex);
+		return rc;
+	}
+
+	/*
+	 * now that allocations for passwords are done, commit them
+	 */
+	if (new_password) {
+		kfree_sensitive(ses->password);
+		ses->password = new_password;
+	}
+	if (new_password2) {
+		kfree_sensitive(ses->password2);
+		ses->password2 = new_password2;
+	}
+
+	mutex_unlock(&ses->session_mutex);
+
 	STEAL_STRING(cifs_sb, ctx, domainname);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
@@ -942,7 +1052,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 
 	switch (opt) {
 	case Opt_compress:
-		ctx->compression = UNKNOWN_TYPE;
+		ctx->compress = true;
 		cifs_dbg(VFS,
 			"SMB3 compression support is experimental\n");
 		break;
@@ -1092,6 +1202,9 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		break;
 	case Opt_min_enc_offload:
 		ctx->min_offload = result.uint_32;
+		break;
+	case Opt_retrans:
+		ctx->retrans = result.uint_32;
 		break;
 	case Opt_blocksize:
 		/*
@@ -1280,6 +1393,18 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 		ctx->password = kstrdup(param->string, GFP_KERNEL);
 		if (ctx->password == NULL) {
 			cifs_errorf(fc, "OOM when copying password string\n");
+			goto cifs_parse_mount_err;
+		}
+		break;
+	case Opt_pass2:
+		kfree_sensitive(ctx->password2);
+		ctx->password2 = NULL;
+		if (strlen(param->string) == 0)
+			break;
+
+		ctx->password2 = kstrdup(param->string, GFP_KERNEL);
+		if (ctx->password2 == NULL) {
+			cifs_errorf(fc, "OOM when copying password2 string\n");
 			goto cifs_parse_mount_err;
 		}
 		break;
@@ -1574,6 +1699,10 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_rdma:
 		ctx->rdma = true;
 		break;
+	case Opt_reparse:
+		if (parse_reparse_flavor(fc, param->string, ctx))
+			goto cifs_parse_mount_err;
+		break;
 	}
 	/* case Opt_ignore: - is ignored as expected ... */
 
@@ -1582,6 +1711,8 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
  cifs_parse_mount_err:
 	kfree_sensitive(ctx->password);
 	ctx->password = NULL;
+	kfree_sensitive(ctx->password2);
+	ctx->password2 = NULL;
 	return -EINVAL;
 }
 
@@ -1659,6 +1790,9 @@ int smb3_init_fs_context(struct fs_context *fc)
 	ctx->backupuid_specified = false; /* no backup intent for a user */
 	ctx->backupgid_specified = false; /* no backup intent for a group */
 
+	ctx->retrans = 1;
+	ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
+
 /*
  *	short int override_uid = -1;
  *	short int override_gid = -1;
@@ -1684,6 +1818,8 @@ smb3_cleanup_fs_context_contents(struct smb3_fs_context *ctx)
 	ctx->username = NULL;
 	kfree_sensitive(ctx->password);
 	ctx->password = NULL;
+	kfree_sensitive(ctx->password2);
+	ctx->password2 = NULL;
 	kfree(ctx->server_hostname);
 	ctx->server_hostname = NULL;
 	kfree(ctx->UNC);

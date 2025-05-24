@@ -471,6 +471,7 @@ int __initdata dt_root_addr_cells;
 int __initdata dt_root_size_cells;
 
 void *initial_boot_params __ro_after_init;
+phys_addr_t initial_boot_params_pa __ro_after_init;
 
 #ifdef CONFIG_OF_EARLY_FLATTREE
 
@@ -615,6 +616,8 @@ static void __init fdt_reserve_elfcorehdr(void)
 	}
 
 	memblock_reserve(elfcorehdr_addr, elfcorehdr_size);
+	memblock_memsize_record("elfcorehdr", elfcorehdr_addr, elfcorehdr_size,
+				false, false);
 
 	pr_info("Reserving %llu KiB of memory at 0x%llx for elfcorehdr\n",
 		elfcorehdr_size >> 10, elfcorehdr_addr);
@@ -635,6 +638,9 @@ void __init early_init_fdt_scan_reserved_mem(void)
 	if (!initial_boot_params)
 		return;
 
+	memblock_memsize_detect_hole();
+	memblock_memsize_disable_tracking();
+
 	fdt_scan_reserved_mem();
 	fdt_reserve_elfcorehdr();
 
@@ -644,9 +650,12 @@ void __init early_init_fdt_scan_reserved_mem(void)
 		if (!size)
 			break;
 		memblock_reserve(base, size);
+		memblock_memsize_record("memreserve", base, size, false, false);
 	}
 
 	fdt_init_reserved_mem();
+
+	memblock_memsize_enable_tracking();
 }
 
 /**
@@ -1292,17 +1301,18 @@ static void * __init early_init_dt_alloc_memory_arch(u64 size, u64 align)
 	return ptr;
 }
 
-bool __init early_init_dt_verify(void *params)
+bool __init early_init_dt_verify(void *dt_virt, phys_addr_t dt_phys)
 {
-	if (!params)
+	if (!dt_virt)
 		return false;
 
 	/* check device tree validity */
-	if (fdt_check_header(params))
+	if (fdt_check_header(dt_virt))
 		return false;
 
 	/* Setup flat device-tree pointer */
-	initial_boot_params = params;
+	initial_boot_params = dt_virt;
+	initial_boot_params_pa = dt_phys;
 	of_fdt_crc32 = crc32_be(~0, initial_boot_params,
 				fdt_totalsize(initial_boot_params));
 	return true;
@@ -1328,11 +1338,11 @@ void __init early_init_dt_scan_nodes(void)
 	early_init_dt_check_for_usable_mem_range();
 }
 
-bool __init early_init_dt_scan(void *params)
+bool __init early_init_dt_scan(void *dt_virt, phys_addr_t dt_phys)
 {
 	bool status;
 
-	status = early_init_dt_verify(params);
+	status = early_init_dt_verify(dt_virt, dt_phys);
 	if (!status)
 		return false;
 

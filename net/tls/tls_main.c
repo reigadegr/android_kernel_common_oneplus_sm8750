@@ -814,9 +814,17 @@ struct tls_context *tls_ctx_create(struct sock *sk)
 		return NULL;
 
 	mutex_init(&ctx->tx_lock);
-	rcu_assign_pointer(icsk->icsk_ulp_data, ctx);
 	ctx->sk_proto = READ_ONCE(sk->sk_prot);
 	ctx->sk = sk;
+	/* Release semantic of rcu_assign_pointer() ensures that
+	 * ctx->sk_proto is visible before changing sk->sk_prot in
+	 * update_sk_prot(), and prevents reading uninitialized value in
+	 * tls_{getsockopt, setsockopt}. Note that we do not need a
+	 * read barrier in tls_{getsockopt,setsockopt} as there is an
+	 * address dependency between sk->sk_proto->{getsockopt,setsockopt}
+	 * and ctx->sk_proto.
+	 */
+	rcu_assign_pointer(icsk->icsk_ulp_data, ctx);
 	return ctx;
 }
 
@@ -1079,9 +1087,11 @@ static int __net_init tls_init_net(struct net *net)
 {
 	int err;
 
+#if defined(CONFIG_TLS_STATS)
 	net->mib.tls_statistics = alloc_percpu(struct linux_tls_mib);
 	if (!net->mib.tls_statistics)
 		return -ENOMEM;
+#endif /* CONFIG_TLS_STATS */
 
 	err = tls_proc_init(net);
 	if (err)
@@ -1089,14 +1099,18 @@ static int __net_init tls_init_net(struct net *net)
 
 	return 0;
 err_free_stats:
+#if defined(CONFIG_TLS_STATS)
 	free_percpu(net->mib.tls_statistics);
+#endif /* CONFIG_TLS_STATS */
 	return err;
 }
 
 static void __net_exit tls_exit_net(struct net *net)
 {
 	tls_proc_fini(net);
+#if defined(CONFIG_TLS_STATS)
 	free_percpu(net->mib.tls_statistics);
+#endif /* CONFIG_TLS_STATS */
 }
 
 static struct pernet_operations tls_proc_ops = {
