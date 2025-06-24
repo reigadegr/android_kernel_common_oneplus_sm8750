@@ -27,7 +27,7 @@ static inline pte_t *contpte_align_down(pte_t *ptep)
 }
 
 static void contpte_try_unfold_partial(struct mm_struct *mm, unsigned long addr,
-					pte_t *ptep, unsigned int nr)
+				       pte_t *ptep, unsigned int nr)
 {
 	/*
 	 * Unfold any partially covered contpte block at the beginning and end
@@ -73,8 +73,8 @@ static void contpte_convert(struct mm_struct *mm, unsigned long addr,
 	__set_ptes(mm, start_addr, start_ptep, pte, CONT_PTES);
 }
 
-void __contpte_try_fold(struct mm_struct *mm, unsigned long addr,
-			pte_t *ptep, pte_t pte)
+void __contpte_try_fold(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
+			pte_t pte)
 {
 	/*
 	 * We have already checked that the virtual and pysical addresses are
@@ -137,8 +137,8 @@ void __contpte_try_fold(struct mm_struct *mm, unsigned long addr,
 }
 EXPORT_SYMBOL(__contpte_try_fold);
 
-void __contpte_try_unfold(struct mm_struct *mm, unsigned long addr,
-			pte_t *ptep, pte_t pte)
+void __contpte_try_unfold(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
+			  pte_t pte)
 {
 	/*
 	 * We have already checked that the ptes are contiguous in
@@ -169,16 +169,46 @@ pte_t contpte_ptep_get(pte_t *ptep, pte_t orig_pte)
 	for (i = 0; i < CONT_PTES; i++, ptep++) {
 		pte = __ptep_get(ptep);
 
-		if (pte_dirty(pte))
+		if (pte_dirty(pte)) {
 			orig_pte = pte_mkdirty(orig_pte);
 
-		if (pte_young(pte))
+			for (; i < CONT_PTES; i++, ptep++) {
+				pte = __ptep_get(ptep);
+				if (pte_young(pte)) {
+					orig_pte = pte_mkyoung(orig_pte);
+					break;
+				}
+			}
+			break;
+		}
+
+		if (pte_young(pte)) {
 			orig_pte = pte_mkyoung(orig_pte);
+			i++;
+			ptep++;
+			for (; i < CONT_PTES; i++, ptep++) {
+				pte = __ptep_get(ptep);
+				if (pte_dirty(pte)) {
+					orig_pte = pte_mkdirty(orig_pte);
+					break;
+				}
+			}
+			break;
+		}
 	}
 
 	return orig_pte;
 }
 EXPORT_SYMBOL(contpte_ptep_get);
+
+static inline bool contpte_is_consistent(pte_t pte, unsigned long pfn,
+					 pgprot_t orig_prot)
+{
+	pgprot_t prot = pte_pgprot(pte_mkold(pte_mkclean(pte)));
+
+	return pte_valid_cont(pte) && pte_pfn(pte) == pfn &&
+	       pgprot_val(prot) == pgprot_val(orig_prot);
+}
 
 pte_t contpte_ptep_get_lockless(pte_t *orig_ptep)
 {
@@ -198,7 +228,6 @@ pte_t contpte_ptep_get_lockless(pte_t *orig_ptep)
 	pgprot_t orig_prot;
 	unsigned long pfn;
 	pte_t orig_pte;
-	pgprot_t prot;
 	pte_t *ptep;
 	pte_t pte;
 	int i;
@@ -215,26 +244,52 @@ retry:
 
 	for (i = 0; i < CONT_PTES; i++, ptep++, pfn++) {
 		pte = __ptep_get(ptep);
-		prot = pte_pgprot(pte_mkold(pte_mkclean(pte)));
 
-		if (!pte_valid_cont(pte) ||
-		   pte_pfn(pte) != pfn ||
-		   pgprot_val(prot) != pgprot_val(orig_prot))
+		if (!contpte_is_consistent(pte, pfn, orig_prot))
 			goto retry;
 
-		if (pte_dirty(pte))
+		if (pte_dirty(pte)) {
 			orig_pte = pte_mkdirty(orig_pte);
+			for (; i < CONT_PTES; i++, ptep++, pfn++) {
+				pte = __ptep_get(ptep);
 
-		if (pte_young(pte))
+				if (!contpte_is_consistent(pte, pfn, orig_prot))
+					goto retry;
+
+				if (pte_young(pte)) {
+					orig_pte = pte_mkyoung(orig_pte);
+					break;
+				}
+			}
+			break;
+		}
+
+		if (pte_young(pte)) {
 			orig_pte = pte_mkyoung(orig_pte);
+			i++;
+			ptep++;
+			pfn++;
+			for (; i < CONT_PTES; i++, ptep++, pfn++) {
+				pte = __ptep_get(ptep);
+
+				if (!contpte_is_consistent(pte, pfn, orig_prot))
+					goto retry;
+
+				if (pte_dirty(pte)) {
+					orig_pte = pte_mkdirty(orig_pte);
+					break;
+				}
+			}
+			break;
+		}
 	}
 
 	return orig_pte;
 }
 EXPORT_SYMBOL(contpte_ptep_get_lockless);
 
-void contpte_set_ptes(struct mm_struct *mm, unsigned long addr,
-					pte_t *ptep, pte_t pte, unsigned int nr)
+void contpte_set_ptes(struct mm_struct *mm, unsigned long addr, pte_t *ptep,
+		      pte_t pte, unsigned int nr)
 {
 	unsigned long next;
 	unsigned long end;
@@ -277,16 +332,15 @@ void contpte_set_ptes(struct mm_struct *mm, unsigned long addr,
 EXPORT_SYMBOL(contpte_set_ptes);
 
 void contpte_clear_full_ptes(struct mm_struct *mm, unsigned long addr,
-				pte_t *ptep, unsigned int nr, int full)
+			     pte_t *ptep, unsigned int nr, int full)
 {
 	contpte_try_unfold_partial(mm, addr, ptep, nr);
 	__clear_full_ptes(mm, addr, ptep, nr, full);
 }
 EXPORT_SYMBOL(contpte_clear_full_ptes);
 
-pte_t contpte_get_and_clear_full_ptes(struct mm_struct *mm,
-				unsigned long addr, pte_t *ptep,
-				unsigned int nr, int full)
+pte_t contpte_get_and_clear_full_ptes(struct mm_struct *mm, unsigned long addr,
+				      pte_t *ptep, unsigned int nr, int full)
 {
 	contpte_try_unfold_partial(mm, addr, ptep, nr);
 	return __get_and_clear_full_ptes(mm, addr, ptep, nr, full);
@@ -294,7 +348,7 @@ pte_t contpte_get_and_clear_full_ptes(struct mm_struct *mm,
 EXPORT_SYMBOL(contpte_get_and_clear_full_ptes);
 
 int contpte_ptep_test_and_clear_young(struct vm_area_struct *vma,
-					unsigned long addr, pte_t *ptep)
+				      unsigned long addr, pte_t *ptep)
 {
 	/*
 	 * ptep_clear_flush_young() technically requires us to clear the access
@@ -319,7 +373,7 @@ int contpte_ptep_test_and_clear_young(struct vm_area_struct *vma,
 EXPORT_SYMBOL(contpte_ptep_test_and_clear_young);
 
 int contpte_ptep_clear_flush_young(struct vm_area_struct *vma,
-					unsigned long addr, pte_t *ptep)
+				   unsigned long addr, pte_t *ptep)
 {
 	int young;
 
@@ -340,7 +394,7 @@ int contpte_ptep_clear_flush_young(struct vm_area_struct *vma,
 EXPORT_SYMBOL(contpte_ptep_clear_flush_young);
 
 void contpte_wrprotect_ptes(struct mm_struct *mm, unsigned long addr,
-					pte_t *ptep, unsigned int nr)
+			    pte_t *ptep, unsigned int nr)
 {
 	/*
 	 * If wrprotecting an entire contig range, we can avoid unfolding. Just
@@ -382,13 +436,14 @@ void contpte_clear_young_dirty_ptes(struct vm_area_struct *vma,
 		ptep = contpte_align_down(ptep);
 	}
 
-	__clear_young_dirty_ptes(vma, start, ptep, (end - start) / PAGE_SIZE, flags);
+	__clear_young_dirty_ptes(vma, start, ptep, (end - start) / PAGE_SIZE,
+				 flags);
 }
 EXPORT_SYMBOL_GPL(contpte_clear_young_dirty_ptes);
 
 int contpte_ptep_set_access_flags(struct vm_area_struct *vma,
-					unsigned long addr, pte_t *ptep,
-					pte_t entry, int dirty)
+				  unsigned long addr, pte_t *ptep, pte_t entry,
+				  int dirty)
 {
 	unsigned long start_addr;
 	pte_t orig_pte;
@@ -421,8 +476,8 @@ int contpte_ptep_set_access_flags(struct vm_area_struct *vma,
 			__ptep_set_access_flags(vma, addr, ptep, entry, 0);
 
 		if (dirty)
-			__flush_tlb_range(vma, start_addr, addr,
-							PAGE_SIZE, true, 3);
+			__flush_tlb_range(vma, start_addr, addr, PAGE_SIZE,
+					  true, 3);
 	} else {
 		__contpte_try_unfold(vma->vm_mm, addr, ptep, orig_pte);
 		__ptep_set_access_flags(vma, addr, ptep, entry, dirty);
