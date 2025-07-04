@@ -28,6 +28,11 @@ typedef enum rq_end_io_ret (rq_end_io_fn)(struct request *, blk_status_t);
  * request flags */
 typedef __u32 __bitwise req_flags_t;
 
+#define RQF_RESV			((__force req_flags_t)(1 << 23))
+#define RQF_ELV			((__force req_flags_t)(1 << 22))
+#define RQF_MQ_POLL_SLEPT	((__force req_flags_t)(1 << 20))
+#define RQF_ELVPRIV		((__force req_flags_t)(1 << 12))
+#define RQF_SOFTBARRIER		((__force req_flags_t)(1 << 3))
 /* drive already may have started this one */
 #define RQF_STARTED		((__force req_flags_t)(1 << 1))
 /* request for flush sequence */
