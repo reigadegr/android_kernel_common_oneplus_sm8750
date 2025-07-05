@@ -2256,9 +2256,9 @@ config CC_HAVE_STACKPROTECTOR_SYSREG
 	def_bool $(cc-option,-mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=0)
 
 config STACKPROTECTOR_PER_TASK
-       bool "Per-task stack protector"
-       depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_SYSREG
-       default y
+        bool "Per-task stack protector"
+        depends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_SYSREG
+        default y
 
 config UNWIND_PATCH_PAC_INTO_SCS
 	bool "Enable shadow call stack dynamically using code patching"
