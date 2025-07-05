@@ -36,16 +36,6 @@ static struct blkcg_policy_data *ssg_blkcg_cpd_alloc(gfp_t gfp)
 	return &ssg_blkcg->cpd;
 }
 
-static void ssg_blkcg_cpd_init(struct blkcg_policy_data *cpd)
-{
-	struct ssg_blkcg *ssg_blkcg = CPD_TO_SSG_BLKCG(cpd);
-
-	if (IS_ERR_OR_NULL(ssg_blkcg))
-		return;
-
-	ssg_blkcg->max_available_ratio = 25;
-}
-
 static void ssg_blkcg_cpd_free(struct blkcg_policy_data *cpd)
 {
 	struct ssg_blkcg *ssg_blkcg = CPD_TO_SSG_BLKCG(cpd);
