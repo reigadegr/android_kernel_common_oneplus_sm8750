@@ -1,0 +1,16 @@
+range: 电量范围
+min 0-20
+low 20-35
+mid_low 35-55
+mid 55-75
+mid_high 75-85
+high 85-95
+
+strategy_temp: 温度范围(单位: 摄氏度)
+little_cold 0-5
+cool 5-12
+little_cool 12-16
+little_cool_high 16-21
+normal_low 21-35
+normal_high 35-44
+warm 44-51
