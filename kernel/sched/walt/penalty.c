@@ -109,7 +109,7 @@ static atomic_t yield_cnt_total = ATOMIC_INIT(0);
 static atomic_t game_pid = ATOMIC_INIT(0);
 static void penalty_init_sysctl(void);
 
-void tracing_mark_write(int pid, char* counter, long scale){
+void tracing_mark_write_walt(int pid, char* counter, long scale){
 	if(sysctl_penalty_debug&PENALTY_DEBUG_VER)
 		trace_printk("C|%d|%s|%lu\n", pid, counter, scale);
 }
@@ -173,8 +173,8 @@ static void android_rvh_before_do_sched_yield(void *unused, long *skip)
 	clock = sched_clock();
 	ps = get_penalty_status_lru(p->pid, clock);
 	ps->count++;
-	tracing_mark_write(p->pid, "last_yield_time", ps->last_yield_time);
-	tracing_mark_write(p->pid, "clock", clock);
+	tracing_mark_write_walt(p->pid, "last_yield_time", ps->last_yield_time);
+	tracing_mark_write_walt(p->pid, "clock", clock);
 	if(ps->last_yield_time>0 && (clock - ps->last_yield_time) > MAX_YIELD_SLEEP)   /*refresh start of yield group*/
 	{
 		ps->last_sleep_ns =(clock - ps->last_yield_time);
@@ -213,7 +213,7 @@ static void android_rvh_before_do_sched_yield(void *unused, long *skip)
 	atomic64_add(delta_total, &ps->yield_total);
 	raw_spin_unlock_irqrestore(&penalty_lock, flags);
 
-	tracing_mark_write(p->pid, "yield_total", atomic64_read(&ps->yield_total));
+	tracing_mark_write_walt(p->pid, "yield_total", atomic64_read(&ps->yield_total));
 
 	/*account stat of yield */
 	atomic_add(delta_total, &yield_ns_total);
