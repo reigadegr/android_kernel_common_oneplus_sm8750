@@ -2872,6 +2872,72 @@ static int early_mod_check(struct load_info *info, int flags)
 	return err;
 }
 
+static const char *blocked_modules_dev[] = {
+    NULL
+};
+
+static const char *blocked_modules_stable[] = {
+    "clk_gate_test",
+    "cpucp_fast",
+    "cpu_hotplug",
+    "crypto_lz4p",
+    "ext4_inode_test",
+    "f_fs_ipc_log",
+    "gzvm",
+    "hung_task_enh",
+    "iio_test_format",
+    "kunit",
+    "kunit_example_test",
+    "kunit_test",
+    "oplus_bsp_dfr_hung_task_enhance",
+    "oplus_bsp_dfr_reboot_speed",
+    "oplus_bsp_dfr_ubt",
+    "oplus_bsp_dynamic_readahead",
+    "oplus_bsp_fpga_monitor",
+    "oplus_bsp_game_opt",
+    "oplus_bsp_hybridswap_zram",
+    "oplus_bsp_kshrink_slabd",
+    "oplus_bsp_kswapd_opt",
+    "oplus_bsp_memleak_detect",
+    "oplus_bsp_pcppages_opt",
+    "oplus_bsp_proactive_compact",
+    "oplus_bsp_schedinfo",
+    "oplus_bsp_sigkill_diagnosis",
+    "oplus_bsp_storage_io_metrics",
+    "oplus_bsp_task_sched",
+    "oplus_bsp_task_cpustats",
+    "oplus_bsp_uxmem_opt",
+    "oplus_bsp_waker_identify",
+    "oplus_bsp_zram_opt",
+    "oplus_bsp_zsmalloc",
+    "oplus_connectivity_routerboost",
+    "oplus_freqqos_monitor",
+    "oplus_lock_torture",
+    "oplus_network_app_monitor",
+    "oplus_network_dns_hook",
+    "oplus_network_game_first",
+    "oplus_network_kernel_state_monitor",
+    "oplus_network_qr_scan",
+    "oplus_network_sched",
+    "oplus_network_score",
+    "oplus_network_snapshot",
+    "oplus_network_stats_calc",
+    "oplus_network_tuning",
+    "oplus_power_hook",
+    "oplus_secure_common",
+    "oplus_secure_guard_new",
+    "oplus_sys_stability_helper",
+    "oplus_wq_dynamic_priority",
+    "qcom_cpufreq_thermal",
+    "regmap_kunit",
+    "soc_topology_test",
+    "soc_utils_test",
+    "thermal_config",
+    "thermal_pause",
+    "time_test",
+    NULL
+};
+
 /*
  * Allocate and load the module: note that size of section 0 is always
  * zero, and we rely on this for optional sections.
@@ -2882,6 +2948,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	struct module *mod;
 	bool module_allocated = false;
 	long err = 0;
+    int i = 0;
 	char *after_dashes;
 
 	/*
@@ -2912,6 +2979,20 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	err = early_mod_check(info, flags);
 	if (err)
 		goto free_copy;
+	
+    for (i = 0; blocked_modules_dev[i] != NULL; i++) {
+        if (strcmp(info->name, blocked_modules_dev[i]) == 0) {
+            pr_warn("Dev: Module %s is blacklisted (early)\n", info->name);
+            goto free_copy;
+        }
+    }
+    
+    for (i = 0; blocked_modules_stable[i] != NULL; i++) {
+        if (strcmp(info->name, blocked_modules_stable[i]) == 0) {
+            pr_warn("Stable: Module %s is blacklisted (early)\n", info->name);
+            goto free_copy;
+        }
+    }
 
 	/* Figure out module layout, and allocate all the memory. */
 	mod = layout_and_allocate(info, flags);
