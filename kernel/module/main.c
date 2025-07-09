@@ -2878,8 +2878,8 @@ static const char *blocked_modules_dev[] = {
 
 static const char *blocked_modules_stable[] = {
     "clk_gate_test",
-    "cpucp_fast",
     "cpu_hotplug",
+    "cpucp_fast",
     "crypto_lz4p",
     "ext4_inode_test",
     "f_fs_ipc_log",
@@ -2889,6 +2889,7 @@ static const char *blocked_modules_stable[] = {
     "kunit",
     "kunit_example_test",
     "kunit_test",
+    "oplus_binder_strategy",
     "oplus_bsp_dfr_hung_task_enhance",
     "oplus_bsp_dfr_reboot_speed",
     "oplus_bsp_dfr_ubt",
@@ -2901,11 +2902,12 @@ static const char *blocked_modules_stable[] = {
     "oplus_bsp_memleak_detect",
     "oplus_bsp_pcppages_opt",
     "oplus_bsp_proactive_compact",
+    "oplus_bsp_sched_ext",
     "oplus_bsp_schedinfo",
     "oplus_bsp_sigkill_diagnosis",
     "oplus_bsp_storage_io_metrics",
-    "oplus_bsp_task_sched",
     "oplus_bsp_task_cpustats",
+    "oplus_bsp_task_sched",
     "oplus_bsp_uxmem_opt",
     "oplus_bsp_waker_identify",
     "oplus_bsp_zram_opt",
@@ -2913,6 +2915,7 @@ static const char *blocked_modules_stable[] = {
     "oplus_connectivity_routerboost",
     "oplus_freqqos_monitor",
     "oplus_lock_torture",
+    "oplus_locking_strategy",
     "oplus_network_app_monitor",
     "oplus_network_dns_hook",
     "oplus_network_game_first",
@@ -2927,6 +2930,7 @@ static const char *blocked_modules_stable[] = {
     "oplus_secure_common",
     "oplus_secure_guard_new",
     "oplus_sys_stability_helper",
+    "oplus_uprobe",
     "oplus_wq_dynamic_priority",
     "qcom_cpufreq_thermal",
     "regmap_kunit",
@@ -2935,6 +2939,7 @@ static const char *blocked_modules_stable[] = {
     "thermal_config",
     "thermal_pause",
     "time_test",
+    "ua_cpu_ioctl",
     NULL
 };
 
