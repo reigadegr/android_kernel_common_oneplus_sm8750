@@ -814,6 +814,7 @@ enum {
 	FI_ATOMIC_DIRTIED,	/* indicate atomic file is dirtied */
 	FI_ATOMIC_REPLACE,	/* indicate atomic replace */
 	FI_OPENED_FILE,		/* indicate file has been opened */
+	FI_DONATE_FINISHED,	/* indicate page donation of file has been finished */
 	FI_MAX,			/* max flag, never be used */
 };
 
@@ -1812,6 +1813,9 @@ struct f2fs_sb_info {
 	s64 peak_atomic_write;
 	u64 committed_atomic_block;
 	u64 revoked_atomic_block;
+
+	/* carve out reserved_blocks from total blocks */
+	bool carve_out;
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 	struct kmem_cache *page_array_slab;	/* page array entry */
