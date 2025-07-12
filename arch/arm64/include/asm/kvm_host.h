@@ -72,8 +72,6 @@ enum kvm_mode kvm_get_mode(void);
 static inline enum kvm_mode kvm_get_mode(void) { return KVM_MODE_NONE; };
 #endif
 
-DECLARE_STATIC_KEY_FALSE(userspace_irqchip_in_use);
-
 extern unsigned int __ro_after_init kvm_sve_max_vl;
 extern unsigned int __ro_after_init kvm_host_sve_max_vl;
 int __init kvm_arm_init_sve(void);
@@ -154,6 +152,8 @@ static inline void __free_hyp_memcache(struct kvm_hyp_memcache *mc,
 
 void free_hyp_memcache(struct kvm_hyp_memcache *mc);
 int topup_hyp_memcache(struct kvm_hyp_memcache *mc, unsigned long min_pages, unsigned long order);
+int topup_hyp_memcache_gfp(struct kvm_hyp_memcache *mc, unsigned long min_pages,
+			   unsigned long order, gfp_t gfp);
 
 static inline void init_hyp_memcache(struct kvm_hyp_memcache *mc)
 {
@@ -229,6 +229,8 @@ struct kvm_pinned_page {
 	u8			order;
 	u16			pins;
 };
+
+#define KVM_DUMMY_PPAGE ((struct kvm_pinned_page *)-1)
 
 typedef unsigned int pkvm_handle_t;
 
@@ -1328,6 +1330,9 @@ bool kvm_arm_vcpu_stopped(struct kvm_vcpu *vcpu);
 int kvm_iommu_init_driver(void);
 void kvm_iommu_remove_driver(void);
 
+struct page *kvm_iommu_cma_alloc(void);
+bool kvm_iommu_cma_release(struct page *p);
+
 int pkvm_iommu_suspend(struct device *dev);
 int pkvm_iommu_resume(struct device *dev);
 
@@ -1344,7 +1349,9 @@ int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops);
 #define HYP_ALLOC_MGT_IOMMU_ID		1
 
 unsigned long __pkvm_reclaim_hyp_alloc_mgt(unsigned long nr_pages);
+int __pkvm_topup_hyp_alloc_mgt_mc(unsigned long id, struct kvm_hyp_memcache *mc);
 int __pkvm_topup_hyp_alloc_mgt(unsigned long id, unsigned long nr_pages,
 			       unsigned long sz_alloc);
-
+int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
+				   unsigned long sz_alloc, gfp_t gfp);
 #endif /* __ARM64_KVM_HOST_H__ */

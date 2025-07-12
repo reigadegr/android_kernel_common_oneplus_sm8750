@@ -330,6 +330,8 @@ static void __pkvm_destroy_hyp_vm(struct kvm *host_kvm)
 	WARN_ON(kvm_call_hyp_nvhe(__pkvm_start_teardown_vm, host_kvm->arch.pkvm.handle));
 
 	mt_for_each(&host_kvm->arch.pkvm.pinned_pages, ppage, ipa, ULONG_MAX) {
+		if (WARN_ON(ppage == KVM_DUMMY_PPAGE))
+			continue;
 		WARN_ON(pkvm_call_hyp_nvhe_ppage(ppage,
 						 __reclaim_dying_guest_page_call,
 						 host_kvm, true));
@@ -408,6 +410,8 @@ static int __pkvm_create_hyp_vm(struct kvm *host_kvm)
 	handle = ret;
 
 	host_kvm->arch.pkvm.handle = handle;
+	atomic64_set(&host_kvm->stat.protected_pgtable_mem, pgd_sz);
+	kvm_account_pgtable_pages(pgd, pgd_sz >> PAGE_SHIFT);
 
 	/* Donate memory for the vcpus at hyp and initialize it. */
 	kvm_for_each_vcpu(idx, host_vcpu, host_kvm) {
@@ -417,8 +421,6 @@ static int __pkvm_create_hyp_vm(struct kvm *host_kvm)
 		__pkvm_vcpu_hyp_created(host_vcpu);
 	}
 
-	atomic64_set(&host_kvm->stat.protected_pgtable_mem, pgd_sz);
-	kvm_account_pgtable_pages(pgd, pgd_sz >> PAGE_SHIFT);
 
 	return 0;
 
@@ -514,6 +516,7 @@ static int __init finalize_pkvm(void)
 	 * at, which would end badly once inaccessible.
 	 */
 	kmemleak_free_part(__hyp_bss_start, __hyp_bss_end - __hyp_bss_start);
+	kmemleak_free_part(__hyp_data_start, __hyp_data_end - __hyp_data_start);
 	kmemleak_free_part(__hyp_rodata_start, __hyp_rodata_end - __hyp_rodata_start);
 	kmemleak_free_part_phys(hyp_mem_base, hyp_mem_size);
 
@@ -538,7 +541,7 @@ void pkvm_host_reclaim_page(struct kvm *host_kvm, phys_addr_t ipa)
 	write_lock(&host_kvm->mmu_lock);
 	ppage = mt_find(&host_kvm->arch.pkvm.pinned_pages, &index,
 			index + PAGE_SIZE - 1);
-	if (ppage) {
+	if (ppage && ppage != KVM_DUMMY_PPAGE) {
 		if (ppage->pins)
 			ppage->pins--;
 		else
@@ -969,19 +972,24 @@ int __pkvm_load_el2_module(struct module *this, unsigned long *token)
 	mod->sections.end = end;
 
 	endrel = (void *)mod->relocs + mod->nr_relocs * sizeof(*endrel);
-	kvm_apply_hyp_module_relocations(start, hyp_va, mod->relocs, endrel);
-
-	/*
-	 * Exclude EL2 module sections from kmemleak before making them
-	 * inaccessible.
-	 */
-	kmemleak_free_part(start, size);
+	kvm_apply_hyp_module_relocations(mod, mod->relocs, endrel);
 
 	ret = hyp_trace_init_mod_events(mod->hyp_events,
 					mod->event_ids.start,
 					mod->nr_hyp_events);
 	if (ret)
 		kvm_err("Failed to init module events: %d\n", ret);
+
+	/*
+	 * Sadly we have also to disable kmemleak for EL1 sections: we can't
+	 * reset created scan area and therefore we can't create a finer grain
+	 * scan excluding only EL2 sections.
+	 */
+	if (this) {
+		kmemleak_no_scan(this->mem[MOD_TEXT].base);
+		kmemleak_no_scan(this->mem[MOD_DATA].base);
+		kmemleak_no_scan(this->mem[MOD_RODATA].base);
+	}
 
 	ret = pkvm_map_module_sections(secs_map + secs_first, hyp_va,
 				       ARRAY_SIZE(secs_map) - secs_first);
@@ -1013,23 +1021,36 @@ int __pkvm_register_el2_call(unsigned long hfn_hyp_va)
 EXPORT_SYMBOL(__pkvm_register_el2_call);
 #endif /* CONFIG_MODULES */
 
-int __pkvm_topup_hyp_alloc_mgt(unsigned long id, unsigned long nr_pages, unsigned long sz_alloc)
+int __pkvm_topup_hyp_alloc_mgt_mc(unsigned long id, struct kvm_hyp_memcache *mc)
+{
+	return kvm_call_hyp_nvhe(__pkvm_hyp_alloc_mgt_refill, id, mc->head,
+				 mc->nr_pages);
+}
+EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt_mc);
+
+int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
+				   unsigned long sz_alloc, gfp_t gfp)
 {
 	struct kvm_hyp_memcache mc;
 	int ret;
 
 	init_hyp_memcache(&mc);
 
-	ret = topup_hyp_memcache(&mc, nr_pages, get_order(sz_alloc));
+	ret = topup_hyp_memcache_gfp(&mc, nr_pages, get_order(sz_alloc), gfp);
 	if (ret)
 		return ret;
 
-	ret = kvm_call_hyp_nvhe(__pkvm_hyp_alloc_mgt_refill, id,
-				mc.head, mc.nr_pages);
+	ret = __pkvm_topup_hyp_alloc_mgt_mc(id, &mc);
 	if (ret)
 		free_hyp_memcache(&mc);
 
 	return ret;
+}
+EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt_gfp);
+
+int __pkvm_topup_hyp_alloc_mgt(unsigned long id, unsigned long nr_pages, unsigned long sz_alloc)
+{
+	return __pkvm_topup_hyp_alloc_mgt_gfp(id, nr_pages, sz_alloc, GFP_KERNEL);
 }
 EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt);
 
