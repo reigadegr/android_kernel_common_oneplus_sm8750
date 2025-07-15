@@ -253,7 +253,7 @@ void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 	ncontig = num_contig_ptes(sz, &pgsize);
 
 	if (!pte_present(pte)) {
-		for (i = 0; i < ncontig; i++, ptep++, addr += pgsize)
+		for (i = 0; i < ncontig; i++, ptep++)
 			__set_ptes(mm, addr, ptep, pte, 1);
 		return;
 	}
