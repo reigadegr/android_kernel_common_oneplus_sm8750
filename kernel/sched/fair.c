@@ -1019,7 +1019,7 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se);
  * XXX: strictly: vd_i += N*r_i/w_i such that: vd_i > ve_i
  * this is probably good enough.
  */
-static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
+static bool update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	bool skip_preempt = false;
     u64 vslice;
@@ -1028,7 +1028,7 @@ static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 	trace_android_rvh_update_deadline(cfs_rq, se, &skip_preempt);
 	if (skip_preempt)
-		return;
+		return false;
 
 	/*
 	 * For EEVDF the virtual time slope is determined by w_i (iow.
@@ -1079,6 +1079,7 @@ static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		resched_curr(rq_of(cfs_rq));
 		clear_buddies(cfs_rq, se);
 	}
+	return true;
 }
 
 #include "pelt.h"
