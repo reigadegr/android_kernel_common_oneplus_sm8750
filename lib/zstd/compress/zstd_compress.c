@@ -54,6 +54,14 @@
 #  define ZSTD_HASHLOG3_MAX 17
 #endif
 
+
+/*-*************************************
+*  Forward declarations
+***************************************/
+size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* inSeqs,
+    size_t nbSequences);
+
+
 /*-*************************************
 *  Helper functions
 ***************************************/
@@ -6901,7 +6909,7 @@ size_t ZSTD_compressSequences(ZSTD_CCtx* cctx,
 }
 
 
-#if defined(__AVX2__)
+#if defined(ZSTD_ARCH_X86_AVX2)
 
 #include <immintrin.h>  /* AVX2 intrinsics */
 
@@ -6921,7 +6929,7 @@ size_t ZSTD_compressSequences(ZSTD_CCtx* cctx,
  * @returns > 0 if there is one long length (> 65535),
  * indicating the position, and type.
  */
-static size_t convertSequences_noRepcodes(
+size_t convertSequences_noRepcodes(
     SeqDef* dstSeqs,
     const ZSTD_Sequence* inSeqs,
     size_t nbSequences)
@@ -7081,7 +7089,7 @@ static size_t convertSequences_noRepcodes(
  * @returns > 0 if there is one long length (> 65535),
  * indicating the position, and type.
  */
-static size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* inSeqs, size_t nbSequences) {
+size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* inSeqs, size_t nbSequences) {
     size_t longLen = 0;
 
     /* RVV depends on the specific definition of target structures */
@@ -7158,9 +7166,131 @@ static size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* 
  * but since this implementation is targeting modern systems (>= Sapphire Rapid),
  * it's not useful to develop and maintain code for older pre-AVX2 platforms */
 
-#else /* no AVX2 */
+#elif defined(ZSTD_ARCH_ARM_NEON) && (defined(__aarch64__) || defined(_M_ARM64))
 
-static size_t convertSequences_noRepcodes(
+size_t convertSequences_noRepcodes(
+    SeqDef* dstSeqs,
+    const ZSTD_Sequence* inSeqs,
+    size_t nbSequences)
+{
+    size_t longLen = 0;
+    size_t n = 0;
+
+    /* Neon permutation depends on the specific definition of target structures. */
+    ZSTD_STATIC_ASSERT(sizeof(ZSTD_Sequence) == 16);
+    ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, offset) == 0);
+    ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, litLength) == 4);
+    ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, matchLength) == 8);
+    ZSTD_STATIC_ASSERT(sizeof(SeqDef) == 8);
+    ZSTD_STATIC_ASSERT(offsetof(SeqDef, offBase) == 0);
+    ZSTD_STATIC_ASSERT(offsetof(SeqDef, litLength) == 4);
+    ZSTD_STATIC_ASSERT(offsetof(SeqDef, mlBase) == 6);
+
+    if (nbSequences > 3) {
+        static const ZSTD_ALIGNED(16) U32 constAddition[4] = {
+            ZSTD_REP_NUM, 0, -MINMATCH, 0
+        };
+        static const ZSTD_ALIGNED(16) U8 constMask[16] = {
+            0, 1, 2, 3, 4, 5, 8, 9, 16, 17, 18, 19, 20, 21, 24, 25
+        };
+        static const ZSTD_ALIGNED(16) U16 constCounter[8] = {
+            1, 1, 1, 1, 2, 2, 2, 2
+        };
+
+        const uint32x4_t vaddition = vld1q_u32(constAddition);
+        const uint8x16_t vmask = vld1q_u8(constMask);
+        uint16x8_t vcounter = vld1q_u16(constCounter);
+        uint16x8_t vindex01 = vdupq_n_u16(0);
+        uint16x8_t vindex23 = vdupq_n_u16(0);
+
+        do {
+            /* Load 4 ZSTD_Sequence (64 bytes). */
+            const uint32x4_t vin0 = vld1q_u32(&inSeqs[n + 0].offset);
+            const uint32x4_t vin1 = vld1q_u32(&inSeqs[n + 1].offset);
+            const uint32x4_t vin2 = vld1q_u32(&inSeqs[n + 2].offset);
+            const uint32x4_t vin3 = vld1q_u32(&inSeqs[n + 3].offset);
+
+            /* Add {ZSTD_REP_NUM, 0, -MINMATCH, 0} to each vector. */
+            const uint8x16x2_t vadd01 = { {
+                vreinterpretq_u8_u32(vaddq_u32(vin0, vaddition)),
+                vreinterpretq_u8_u32(vaddq_u32(vin1, vaddition)),
+            } };
+            const uint8x16x2_t vadd23 = { {
+                vreinterpretq_u8_u32(vaddq_u32(vin2, vaddition)),
+                vreinterpretq_u8_u32(vaddq_u32(vin3, vaddition)),
+            } };
+
+            /* Shuffle and pack bytes so each vector contains 2 SeqDef structures. */
+            const uint8x16_t vout01 = vqtbl2q_u8(vadd01, vmask);
+            const uint8x16_t vout23 = vqtbl2q_u8(vadd23, vmask);
+
+            /* Pack the upper 16-bits of 32-bit lanes for overflow check. */
+            uint16x8_t voverflow01 = vuzp2q_u16(vreinterpretq_u16_u8(vadd01.val[0]),
+                                                vreinterpretq_u16_u8(vadd01.val[1]));
+            uint16x8_t voverflow23 = vuzp2q_u16(vreinterpretq_u16_u8(vadd23.val[0]),
+                                                vreinterpretq_u16_u8(vadd23.val[1]));
+
+            /* Store 4 SeqDef structures. */
+            vst1q_u32(&dstSeqs[n + 0].offBase, vreinterpretq_u32_u8(vout01));
+            vst1q_u32(&dstSeqs[n + 2].offBase, vreinterpretq_u32_u8(vout23));
+
+            /* Create masks in case of overflow. */
+            voverflow01 = vcgtzq_s16(vreinterpretq_s16_u16(voverflow01));
+            voverflow23 = vcgtzq_s16(vreinterpretq_s16_u16(voverflow23));
+
+            /* Update overflow indices. */
+            vindex01 = vbslq_u16(voverflow01, vcounter, vindex01);
+            vindex23 = vbslq_u16(voverflow23, vcounter, vindex23);
+
+            /* Update counter for overflow check. */
+            vcounter = vaddq_u16(vcounter, vdupq_n_u16(4));
+
+            n += 4;
+        } while(n < nbSequences - 3);
+
+        /* Fixup indices in the second vector, we saved an additional counter
+           in the loop to update the second overflow index, we need to add 2
+           here when the indices are not 0. */
+        {   uint16x8_t nonzero = vtstq_u16(vindex23, vindex23);
+            vindex23 = vsubq_u16(vindex23, nonzero);
+            vindex23 = vsubq_u16(vindex23, nonzero);
+        }
+
+        /* Merge indices in the vectors, maximums are needed. */
+        vindex01 = vmaxq_u16(vindex01, vindex23);
+        vindex01 = vmaxq_u16(vindex01, vextq_u16(vindex01, vindex01, 4));
+
+        /* Compute `longLen`, maximums of matchLength and litLength
+           with a preference on litLength. */
+        {   U64 maxLitMatchIndices = vgetq_lane_u64(vreinterpretq_u64_u16(vindex01), 0);
+            size_t maxLitIndex = (maxLitMatchIndices >> 16) & 0xFFFF;
+            size_t maxMatchIndex = (maxLitMatchIndices >> 32) & 0xFFFF;
+            longLen = maxLitIndex > maxMatchIndex ? maxLitIndex + nbSequences
+                                                  : maxMatchIndex;
+        }
+    }
+
+    /* Handle remaining elements. */
+    for (; n < nbSequences; n++) {
+        dstSeqs[n].offBase = OFFSET_TO_OFFBASE(inSeqs[n].offset);
+        dstSeqs[n].litLength = (U16)inSeqs[n].litLength;
+        dstSeqs[n].mlBase = (U16)(inSeqs[n].matchLength - MINMATCH);
+        /* Check for long length > 65535. */
+        if (UNLIKELY(inSeqs[n].matchLength > 65535 + MINMATCH)) {
+            assert(longLen == 0);
+            longLen = n + 1;
+        }
+        if (UNLIKELY(inSeqs[n].litLength > 65535)) {
+            assert(longLen == 0);
+            longLen = n + nbSequences + 1;
+        }
+    }
+    return longLen;
+}
+
+#else /* No vectorization. */
+
+size_t convertSequences_noRepcodes(
     SeqDef* dstSeqs,
     const ZSTD_Sequence* inSeqs,
     size_t nbSequences)
@@ -7171,7 +7301,7 @@ static size_t convertSequences_noRepcodes(
         dstSeqs[n].offBase = OFFSET_TO_OFFBASE(inSeqs[n].offset);
         dstSeqs[n].litLength = (U16)inSeqs[n].litLength;
         dstSeqs[n].mlBase = (U16)(inSeqs[n].matchLength - MINMATCH);
-        /* check for long length > 65535 */
+        /* Check for long length > 65535. */
         if (UNLIKELY(inSeqs[n].matchLength > 65535+MINMATCH)) {
             assert(longLen == 0);
             longLen = n + 1;
@@ -7387,29 +7517,104 @@ BlockSummary ZSTD_get1BlockSummary(const ZSTD_Sequence* seqs, size_t nbSeqs)
 
 #else
 
+/*
+ * The function assumes `litMatchLength` is a packed 64-bit value where the
+ * lower 32 bits represent the match length. The check varies based on the
+ * system's endianness:
+ * - On little-endian systems, it verifies if the entire 64-bit value is at most
+ * 0xFFFFFFFF, indicating the match length (lower 32 bits) is zero.
+ * - On big-endian systems, it directly checks if the lower 32 bits are zero.
+ *
+ * @returns 1 if the match length is zero, 0 otherwise.
+ */
+FORCE_INLINE_TEMPLATE int matchLengthHalfIsZero(U64 litMatchLength)
+{
+    if (MEM_isLittleEndian()) {
+        return litMatchLength <= 0xFFFFFFFFULL;
+    } else {
+        return (U32)litMatchLength == 0;
+    }
+}
+
 BlockSummary ZSTD_get1BlockSummary(const ZSTD_Sequence* seqs, size_t nbSeqs)
 {
-    size_t totalMatchSize = 0;
-    size_t litSize = 0;
-    size_t n;
+    /* Use multiple accumulators for efficient use of wide out-of-order machines. */
+    U64 litMatchSize0 = 0;
+    U64 litMatchSize1 = 0;
+    U64 litMatchSize2 = 0;
+    U64 litMatchSize3 = 0;
+    size_t n = 0;
+
+    ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, litLength) + 4 == offsetof(ZSTD_Sequence, matchLength));
+    ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, matchLength) + 4 == offsetof(ZSTD_Sequence, rep));
     assert(seqs);
-    for (n=0; n<nbSeqs; n++) {
-        totalMatchSize += seqs[n].matchLength;
-        litSize += seqs[n].litLength;
-        if (seqs[n].matchLength == 0) {
+
+    if (nbSeqs > 3) {
+        /* Process the input in 4 independent streams to reach high throughput. */
+        do {
+            /* Load `litLength` and `matchLength` as a packed `U64`. It is safe
+             * to use 64-bit unsigned arithmetic here because the sum of `litLength`
+             * and `matchLength` cannot exceed the block size, so the 32-bit
+             * subparts will never overflow. */
+            U64 litMatchLength = MEM_read64(&seqs[n].litLength);
+            litMatchSize0 += litMatchLength;
+            if (matchLengthHalfIsZero(litMatchLength)) {
+                assert(seqs[n].offset == 0);
+                goto _out;
+            }
+
+            litMatchLength = MEM_read64(&seqs[n + 1].litLength);
+            litMatchSize1 += litMatchLength;
+            if (matchLengthHalfIsZero(litMatchLength)) {
+                n += 1;
+                assert(seqs[n].offset == 0);
+                goto _out;
+            }
+
+            litMatchLength = MEM_read64(&seqs[n + 2].litLength);
+            litMatchSize2 += litMatchLength;
+            if (matchLengthHalfIsZero(litMatchLength)) {
+                n += 2;
+                assert(seqs[n].offset == 0);
+                goto _out;
+            }
+
+            litMatchLength = MEM_read64(&seqs[n + 3].litLength);
+            litMatchSize3 += litMatchLength;
+            if (matchLengthHalfIsZero(litMatchLength)) {
+                n += 3;
+                assert(seqs[n].offset == 0);
+                goto _out;
+            }
+
+            n += 4;
+        } while(n < nbSeqs - 3);
+    }
+
+    for (; n < nbSeqs; n++) {
+        U64 litMatchLength = MEM_read64(&seqs[n].litLength);
+        litMatchSize0 += litMatchLength;
+        if (matchLengthHalfIsZero(litMatchLength)) {
             assert(seqs[n].offset == 0);
-            break;
+            goto _out;
         }
     }
-    if (n==nbSeqs) {
-        BlockSummary bs;
+    /* At this point n == nbSeqs, so no end terminator. */
+    {   BlockSummary bs;
         bs.nbSequences = ERROR(externalSequences_invalid);
         return bs;
     }
+_out:
+    litMatchSize0 += litMatchSize1 + litMatchSize2 + litMatchSize3;
     {   BlockSummary bs;
-        bs.nbSequences = n+1;
-        bs.blockSize = litSize + totalMatchSize;
-        bs.litSize = litSize;
+        bs.nbSequences = n + 1;
+        if (MEM_isLittleEndian()) {
+            bs.litSize = (U32)litMatchSize0;
+            bs.blockSize = bs.litSize + (litMatchSize0 >> 32);
+        } else {
+            bs.litSize = litMatchSize0 >> 32;
+            bs.blockSize = bs.litSize + (U32)litMatchSize0;
+        }
         return bs;
     }
 }
