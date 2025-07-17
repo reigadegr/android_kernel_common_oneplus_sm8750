@@ -1022,12 +1022,12 @@ static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se);
 static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	bool skip_preempt = false;
+    u64 vslice;
+    u64 tolerance = 0;
+    u64 next_deadline;
 
 	trace_android_rvh_update_deadline(cfs_rq, se, &skip_preempt);
 	if (skip_preempt)
-		return;
-
-	if ((s64)(se->vruntime - se->deadline) < 0)
 		return;
 
 	/*
@@ -1036,11 +1036,41 @@ static void update_deadline(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	 * sysctl_sched_base_slice.
 	 */
 	se->slice = sysctl_sched_base_slice;
+	vslice = calc_delta_fair(se->slice, se);
 
 	/*
-	 * EEVDF: vd_i = ve_i + r_i / w_i
+	 * vd_i = ve_i + r_i / w_i
 	 */
-	se->deadline = se->vruntime + calc_delta_fair(se->slice, se);
+	next_deadline = se->vruntime + vslice;
+
+	if (sched_feat(FORWARD_DEADLINE))
+		tolerance = min(vslice>>7, TICK_NSEC/2);
+
+	if ((s64)(se->vruntime + tolerance - se->deadline) < 0)
+		return false;
+	/*
+	 * when se->vruntime + tolerance - se->deadline >= 0
+	 * but se->vruntime - se->deadline < 0,
+	 * there is two case: if entity is eligible?
+	 * if entity is not eligible, we don't need wait deadline, because
+	 * eevdf don't guarantee
+	 * an ineligible entity can exec its request time in one go.
+	 * but when entity eligible, just let it run, which is the
+	 * same processing logic as before.
+	 */
+	if (sched_feat(FORWARD_DEADLINE) && (s64)(se->vruntime - se->deadline) < 0) {
+
+		if (entity_eligible(cfs_rq, se))
+			return false;
+
+		/*
+		 * vd_i = vd_i + r_i / w_i
+		 */
+		next_deadline = se->deadline + vslice;
+	}
+
+
+	se->deadline = next_deadline;
 
 	/*
 	 * The task has consumed its request, reschedule.
