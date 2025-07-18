@@ -1880,8 +1880,6 @@ init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 }
 #endif /* CONFIG_NUMA_BALANCING */
 
-extern void sched_update_scaling_or_slice(void);
-
 #ifdef CONFIG_SMP
 
 extern int migrate_swap(struct task_struct *p, struct task_struct *t,
@@ -2051,6 +2049,8 @@ static inline void dirty_sched_domain_sysctl(int cpu)
 {
 }
 #endif
+
+extern int sched_update_scaling(void);
 
 static inline const struct cpumask *task_user_cpus(struct task_struct *p)
 {
