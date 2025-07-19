@@ -1173,7 +1173,7 @@ static s64 update_curr_se(struct rq *rq, struct sched_entity *curr)
 
 		stats = __schedstats_from_se(curr);
 		__schedstat_set(stats->exec_max,
-				max(delta_exec, stats->exec_max));
+                max_t(u64, delta_exec, stats->exec_max));
 	}
 
 	return delta_exec;
