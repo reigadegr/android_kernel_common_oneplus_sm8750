@@ -20,13 +20,16 @@ enum Value {
     Boolean(bool),
     Number(i32),
     String(String),
-    Array(Vec<Value>),
     Object(Object),
 }
 
 type Object = Vec<(String, Value)>;
 
-fn comma_sep<T>(seq: &[T], formatter: &mut Formatter<'_>, f: impl Fn(&mut Formatter<'_>, &T) -> Result) -> Result {
+fn comma_sep<T>(
+    seq: &[T],
+    formatter: &mut Formatter<'_>,
+    f: impl Fn(&mut Formatter<'_>, &T) -> Result,
+) -> Result {
     if let [ref rest @ .., ref last] = seq[..] {
         for v in rest {
             f(formatter, v)?;
@@ -37,7 +40,7 @@ fn comma_sep<T>(seq: &[T], formatter: &mut Formatter<'_>, f: impl Fn(&mut Format
     Ok(())
 }
 
-/// Minimal "almost JSON" generator (e.g. no `null`s, no escaping),
+/// Minimal "almost JSON" generator (e.g. no `null`s, no arrays, no escaping),
 /// enough for this purpose.
 impl Display for Value {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> Result {
@@ -45,15 +48,17 @@ impl Display for Value {
             Value::Boolean(boolean) => write!(formatter, "{}", boolean),
             Value::Number(number) => write!(formatter, "{}", number),
             Value::String(string) => write!(formatter, "\"{}\"", string),
-            Value::Array(values) => {
-                formatter.write_str("[")?;
-                comma_sep(&values[..], formatter, |formatter, v| v.fmt(formatter))?;
-                formatter.write_str("]")
-            }
             Value::Object(object) => {
                 formatter.write_str("{")?;
-                comma_sep(&object[..], formatter, |formatter, v|
-                          write!(formatter, "\"{}\": {}", v.0, v.1))?;
+                comma_sep(&object[..], formatter, |formatter, v| {
+                    write!(formatter, "\"{}\": {}", v.0, v.1)
+                })?;
+                if let [ref rest @ .., ref last] = object[..] {
+                    for (key, value) in rest {
+                        write!(formatter, "\"{}\": {},", key, value)?;
+                    }
+                    write!(formatter, "\"{}\": {}", last.0, last.1)?;
+                }
                 formatter.write_str("}")
             }
         }
@@ -90,7 +95,7 @@ impl From<Object> for Value {
     }
 }
 
-impl <T: Into<Value>, const N: usize> From<[T; N]> for Value {
+impl<T: Into<Value>, const N: usize> From<[T; N]> for Value {
     fn from(i: [T; N]) -> Self {
         Self::Array(i.into_iter().map(|v| v.into()).collect())
     }
@@ -102,9 +107,39 @@ impl TargetSpec {
     fn new() -> TargetSpec {
         TargetSpec(Vec::new())
     }
+}
 
-    fn push(&mut self, key: &str, value: impl Into<Value>) {
-        self.0.push((key.to_string(), value.into()));
+trait Push<T> {
+    fn push(&mut self, key: &str, value: T);
+}
+
+impl Push<bool> for TargetSpec {
+    fn push(&mut self, key: &str, value: bool) {
+        self.0.push((key.to_string(), Value::Boolean(value)));
+    }
+}
+
+impl Push<i32> for TargetSpec {
+    fn push(&mut self, key: &str, value: i32) {
+        self.0.push((key.to_string(), Value::Number(value)));
+    }
+}
+
+impl Push<String> for TargetSpec {
+    fn push(&mut self, key: &str, value: String) {
+        self.0.push((key.to_string(), Value::String(value)));
+    }
+}
+
+impl Push<&str> for TargetSpec {
+    fn push(&mut self, key: &str, value: &str) {
+        self.push(key, value.to_string());
+    }
+}
+
+impl Push<Object> for TargetSpec {
+    fn push(&mut self, key: &str, value: Object) {
+        self.0.push((key.to_string(), Value::Object(value)));
     }
 }
 
@@ -168,7 +203,20 @@ fn main() {
 
     // `llvm-target`s are taken from `scripts/Makefile.clang`.
     if cfg.has("ARM64") {
-        panic!("arm64 uses the builtin rustc aarch64-unknown-none target");
+        ts.push("arch", "aarch64");
+        ts.push(
+            "data-layout",
+            "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128",
+        );
+        ts.push("disable-redzone", true);
+        let mut features = "+v8a,+strict-align,-neon,-fp-armv8".to_string();
+        if cfg.has("SHADOW_CALL_STACK") {
+            features += ",+reserve-x18";
+        }
+        ts.push("features", features);
+        ts.push("llvm-target", "aarch64-linux-gnu");
+        ts.push("supported-sanitizers", ["kcfi"]);
+        ts.push("target-pointer-width", "64");
     } else if cfg.has("X86_64") {
         ts.push("arch", "x86_64");
         ts.push(
@@ -181,7 +229,6 @@ fn main() {
         }
         ts.push("features", features);
         ts.push("llvm-target", "x86_64-linux-gnu");
-        ts.push("supported-sanitizers", ["kcfi"]);
         ts.push("target-pointer-width", "64");
     } else {
         panic!("Unsupported architecture");
