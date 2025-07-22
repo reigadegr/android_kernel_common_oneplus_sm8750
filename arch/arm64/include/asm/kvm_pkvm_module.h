@@ -12,6 +12,7 @@ typedef void (*dyn_hcall_t)(struct user_pt_regs *);
 struct kvm_hyp_iommu;
 struct iommu_iotlb_gather;
 struct kvm_hyp_iommu_domain;
+struct kvm_iommu_paddr_cache;
 
 #ifdef CONFIG_MODULES
 enum pkvm_psci_notification {
