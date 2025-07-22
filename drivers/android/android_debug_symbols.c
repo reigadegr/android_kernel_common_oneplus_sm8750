@@ -18,6 +18,7 @@
 #include <linux/swap.h>
 #include <linux/compaction.h>
 #include <linux/cma.h>
+#include "../mm/slab.h"
 
 struct ads_entry {
 	char *name;
