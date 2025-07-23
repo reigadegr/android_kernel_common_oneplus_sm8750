@@ -7,6 +7,8 @@
 
 #ifdef CONFIG_PTDUMP_CORE
 
+DECLARE_STATIC_KEY_FALSE(arm64_ptdump_lock_key);
+
 #include <linux/mm_types.h>
 #include <linux/seq_file.h>
 #include <linux/ptdump.h>
