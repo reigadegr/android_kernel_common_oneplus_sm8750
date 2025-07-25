@@ -7078,7 +7078,7 @@ size_t convertSequences_noRepcodes(
 #elif defined ZSTD_ARCH_RISCV_RVV
 #include <riscv_vector.h>
 /*
- * Convert `vl` sequences per iteration, using AVX2 intrinsics:
+ * Convert `vl` sequences per iteration, using RVV intrinsics:
  *   - offset -> offBase = offset + 2
  *   - litLength -> (U16) litLength
  *   - matchLength -> (U16)(matchLength - 3)
@@ -7091,7 +7091,8 @@ size_t convertSequences_noRepcodes(
  */
 size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* inSeqs, size_t nbSequences) {
     size_t longLen = 0;
-
+    size_t vl = 0;
+    typedef uint32_t __attribute__((may_alias)) aliased_u32;
     /* RVV depends on the specific definition of target structures */
     ZSTD_STATIC_ASSERT(sizeof(ZSTD_Sequence) == 16);
     ZSTD_STATIC_ASSERT(offsetof(ZSTD_Sequence, offset) == 0);
@@ -7101,62 +7102,68 @@ size_t convertSequences_noRepcodes(SeqDef* dstSeqs, const ZSTD_Sequence* inSeqs,
     ZSTD_STATIC_ASSERT(offsetof(SeqDef, offBase) == 0);
     ZSTD_STATIC_ASSERT(offsetof(SeqDef, litLength) == 4);
     ZSTD_STATIC_ASSERT(offsetof(SeqDef, mlBase) == 6);
-    size_t vl = 0;
+    
     for (size_t i = 0; i < nbSequences; i += vl) {
 
-        vl = __riscv_vsetvl_e32m2(nbSequences-i);
-        // Loading structure member variables
-        vuint32m2x4_t v_tuple = __riscv_vlseg4e32_v_u32m2x4(
-            (const int32_t*)&inSeqs[i], 
-            vl
-        );
-        vuint32m2_t v_offset = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 0);
-        vuint32m2_t v_lit = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 1);
-        vuint32m2_t v_match = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 2);
-        // offset + ZSTD_REP_NUM
-        vuint32m2_t v_offBase = __riscv_vadd_vx_u32m2(v_offset, ZSTD_REP_NUM, vl); 
-        // Check for integer overflow
-        // Cast to a 16-bit variable
-        vbool16_t lit_overflow = __riscv_vmsgtu_vx_u32m2_b16(v_lit, 65535, vl);
-        vuint16m1_t v_lit_clamped = __riscv_vncvt_x_x_w_u16m1(v_lit, vl);
+        vl = __riscv_vsetvl_e32m2(nbSequences-i);       
+        {
+            // Loading structure member variables
+            vuint32m2x4_t v_tuple = __riscv_vlseg4e32_v_u32m2x4(
+                (const aliased_u32*)((const void*)&inSeqs[i]), 
+                vl
+            );
+            vuint32m2_t v_offset = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 0);
+            vuint32m2_t v_lit = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 1);
+            vuint32m2_t v_match = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 2);
+            // offset + ZSTD_REP_NUM
+            vuint32m2_t v_offBase = __riscv_vadd_vx_u32m2(v_offset, ZSTD_REP_NUM, vl); 
+            // Check for integer overflow
+            // Cast to a 16-bit variable
+            vbool16_t lit_overflow = __riscv_vmsgtu_vx_u32m2_b16(v_lit, 65535, vl);
+            vuint16m1_t v_lit_clamped = __riscv_vncvt_x_x_w_u16m1(v_lit, vl);
 
-        vbool16_t ml_overflow = __riscv_vmsgtu_vx_u32m2_b16(v_match, 65535+MINMATCH, vl);
-        vuint16m1_t v_ml_clamped = __riscv_vncvt_x_x_w_u16m1(__riscv_vsub_vx_u32m2(v_match, MINMATCH, vl), vl);
+            vbool16_t ml_overflow = __riscv_vmsgtu_vx_u32m2_b16(v_match, 65535+MINMATCH, vl);
+            vuint16m1_t v_ml_clamped = __riscv_vncvt_x_x_w_u16m1(__riscv_vsub_vx_u32m2(v_match, MINMATCH, vl), vl);
 
-        // Pack two 16-bit fields into a 32-bit value (little-endian)
-        // The lower 16 bits contain litLength, and the upper 16 bits contain mlBase
-        vuint32m2_t v_lit_ml_combined = __riscv_vsll_vx_u32m2(
-            __riscv_vwcvtu_x_x_v_u32m2(v_ml_clamped, vl), // Convert matchLength to 32-bit
-            16, 
-            vl
-        );
-        v_lit_ml_combined = __riscv_vor_vv_u32m2(
-            v_lit_ml_combined,
-            __riscv_vwcvtu_x_x_v_u32m2(v_lit_clamped, vl),
-            vl
-        );
-        // Create a vector of SeqDef structures
-        // Store the offBase, litLength, and mlBase in a vector of SeqDef
-        vuint32m2x2_t store_data = __riscv_vcreate_v_u32m2x2(
-            v_offBase,          
-            v_lit_ml_combined   
-        );
-        __riscv_vsseg2e32_v_u32m2x2(
-            (uint32_t*)&dstSeqs[i], 
-            store_data,             
-            vl                      
-        );
-        // Find the first index where an overflow occurs
-        int first_ml = __riscv_vfirst_m_b16(ml_overflow, vl);
-        int first_lit = __riscv_vfirst_m_b16(lit_overflow, vl);
+            // Pack two 16-bit fields into a 32-bit value (little-endian)
+            // The lower 16 bits contain litLength, and the upper 16 bits contain mlBase
+            vuint32m2_t v_lit_ml_combined = __riscv_vsll_vx_u32m2(
+                __riscv_vwcvtu_x_x_v_u32m2(v_ml_clamped, vl), // Convert matchLength to 32-bit
+                16, 
+                vl
+            );
+            v_lit_ml_combined = __riscv_vor_vv_u32m2(
+                v_lit_ml_combined,
+                __riscv_vwcvtu_x_x_v_u32m2(v_lit_clamped, vl),
+                vl
+            );
+            {
+                // Create a vector of SeqDef structures
+                // Store the offBase, litLength, and mlBase in a vector of SeqDef
+                vuint32m2x2_t store_data = __riscv_vcreate_v_u32m2x2(
+                    v_offBase,          
+                    v_lit_ml_combined   
+                );
+                __riscv_vsseg2e32_v_u32m2x2(
+                    (aliased_u32*)((void*)&dstSeqs[i]), 
+                    store_data,             
+                    vl                      
+                );
+            }
+            {
+                // Find the first index where an overflow occurs
+                int first_ml = __riscv_vfirst_m_b16(ml_overflow, vl);
+                int first_lit = __riscv_vfirst_m_b16(lit_overflow, vl);
 
-        if (UNLIKELY(first_ml != -1)) {
-            assert(longLen == 0);
-            longLen = i + first_ml + 1;
-        }
-        if (UNLIKELY(first_lit != -1)) {
-            assert(longLen == 0);
-            longLen = i + first_lit + 1 + nbSequences;
+                if (UNLIKELY(first_ml != -1)) {
+                    assert(longLen == 0);
+                    longLen = i + first_ml + 1;
+                }
+                if (UNLIKELY(first_lit != -1)) {
+                    assert(longLen == 0);
+                    longLen = i + first_lit + 1 + nbSequences;
+                }
+            }
         }
     }
     return longLen;
@@ -7460,18 +7467,17 @@ BlockSummary ZSTD_get1BlockSummary(const ZSTD_Sequence* seqs, size_t nbSeqs)
     size_t i = 0;
     int found_terminator = 0; 
     size_t vl_max = __riscv_vsetvlmax_e32m1();
+    typedef uint32_t __attribute__((may_alias)) aliased_u32;
     vuint32m1_t v_lit_sum = __riscv_vmv_v_x_u32m1(0, vl_max);
     vuint32m1_t v_match_sum = __riscv_vmv_v_x_u32m1(0, vl_max);
 
     for (; i  < nbSeqs; ) {
         size_t vl = __riscv_vsetvl_e32m2(nbSeqs - i); 
 
-        ptrdiff_t stride = sizeof(ZSTD_Sequence); // 16
         vuint32m2x4_t v_tuple = __riscv_vlseg4e32_v_u32m2x4(
-            (const int32_t*)&seqs[i], 
+            (const aliased_u32*)((const void*)&seqs[i]), 
             vl
         );
-        vuint32m2_t v_offset = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 0);
         vuint32m2_t v_lit = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 1);
         vuint32m2_t v_match = __riscv_vget_v_u32m2x4_u32m2(v_tuple, 2);
 
