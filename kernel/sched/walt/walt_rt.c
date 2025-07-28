@@ -133,8 +133,8 @@ static void walt_rt_energy_aware_wake_cpu(struct task_struct *task, struct cpuma
 			if (sched_cpu_high_irqload(cpu))
 				continue;
 
-				if (__cpu_overutilized(cpu, tutil))
-					continue;
+			if (__cpu_overutilized(cpu, tutil))
+				continue;
 			util = cpu_util(cpu);
 
 			lt = (walt_low_latency_task(cpu_rq(cpu)->curr) ||
