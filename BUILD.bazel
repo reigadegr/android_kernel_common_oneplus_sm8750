@@ -2531,6 +2531,14 @@ copy_to_dist_dir(
     flat = True,
 )
 
+load(":consolidate.bzl", "define_consolidate")
+
+define_consolidate()
+
+load(":consolidate_16k.bzl", "define_consolidate_16k")
+
+define_consolidate_16k()
+
 _TEST_MAPPINGS = glob(["**/TEST_MAPPING"])
 
 pkg_files(
