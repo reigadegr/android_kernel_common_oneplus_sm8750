@@ -23,7 +23,6 @@
 #include <linux/page-flags.h>
 #include <linux/local_lock.h>
 #include <linux/android_kabi.h>
-#include <linux/kcompress.h>
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
@@ -1453,7 +1452,7 @@ typedef struct pglist_data {
 	struct memory_failure_stats mf_stats;
 #endif
 
-	ANDROID_KABI_USE(1, struct kcompress_data *kcompress);
+	ANDROID_KABI_RESERVE(1);
 } pg_data_t;
 
 #define node_present_pages(nid)	(NODE_DATA(nid)->node_present_pages)
