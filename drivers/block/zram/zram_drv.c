@@ -1889,11 +1889,11 @@ static void zram_bio_discard(struct zram *zram, struct bio *bio)
 	}
 
     for (; n >= PAGE_SIZE; n -= PAGE_SIZE, index++) {
-		if (!zram_get_entry(zram, index))
+		if (!zram_get_handle(zram, index))
 		    continue;
 
 		zram_slot_lock(zram, index);
-		if (zram_get_entry(zram, index)) {
+		if (zram_get_handle(zram, index)) {
 			zram_free_page(zram, index);
 			atomic64_inc(&zram->stats.notify_free);
 			freed_pages++;
