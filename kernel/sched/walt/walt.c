@@ -23,6 +23,7 @@
 #include <trace/events/power.h>
 #include "walt.h"
 #include "trace.h"
+#include "penalty.h"
 
 const char *task_event_names[] = {
 	"PUT_PREV_TASK",
@@ -4744,6 +4745,7 @@ static void android_rvh_flush_task(void *unused, struct task_struct *p)
 {
 	if (unlikely(walt_disabled))
 		return;
+	penalty_flush_task(p);
 	walt_task_dead(p);
 }
 
