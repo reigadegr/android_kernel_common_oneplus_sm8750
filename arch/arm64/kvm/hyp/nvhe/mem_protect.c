@@ -398,6 +398,11 @@ static int relinquish_walker(const struct kvm_pgtable_visit_ctx *ctx,
 	phys = kvm_pte_to_phys(pte);
 	phys += ctx->addr - addr;
 
+	if (state == PKVM_PAGE_OWNED) {
+		hyp_poison_page(phys, PAGE_SIZE);
+		psci_mem_protect_dec(1);
+	}
+
 	data->pa = phys;
 
 	return 0;
