@@ -42,11 +42,6 @@ union uac23_clock_multiplier_desc {
 	 ((p)->v3.bLength >= sizeof((p)->v3)) :	\
 	 ((p)->v2.bLength >= sizeof((p)->v2)))
 
-/* check whether the descriptor bLength has the minimal length */
-#define DESC_LENGTH_CHECK(p, proto) \
-	((proto) == UAC_VERSION_3 ? \
-	 ((p)->v3.bLength >= sizeof((p)->v3)) :	\
-	 ((p)->v2.bLength >= sizeof((p)->v2)))
 #define GET_VAL(p, proto, field) \
 	((proto) == UAC_VERSION_3 ? (p)->v3.field : (p)->v2.field)
 

@@ -57,6 +57,7 @@
 #include <linux/delayacct.h>
 #include <trace/hooks/vmscan.h>
 #include <trace/hooks/mm.h>
+
 #include <asm/div64.h>
 #include "internal.h"
 #include "shuffle.h"
@@ -2635,8 +2636,12 @@ void free_unref_page(struct page *page, unsigned int order)
 	unsigned long pfn = page_to_pfn(page);
 	int migratetype;
 	bool skip_free_unref_page = false;
+	bool bypass = false;
 
 	if (!free_pages_prepare(page, order, FPI_NONE))
+		return;
+	trace_android_vh_reserve_highatomic_bypass(page, &bypass);
+	if (bypass)
 		return;
 
 	/*
