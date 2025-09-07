@@ -2308,6 +2308,9 @@ struct sched_class {
 #endif
 
 	void (*enqueue_task) (struct rq *rq, struct task_struct *p, int flags);
+#ifndef __GENKSYMS__
+	bool (*__dequeue_task) (struct rq *rq, struct task_struct *p, int flags);
+#endif
 	void (*dequeue_task) (struct rq *rq, struct task_struct *p, int flags);
 	void (*yield_task)   (struct rq *rq);
 	bool (*yield_to_task)(struct rq *rq, struct task_struct *p);
@@ -2508,6 +2511,8 @@ extern void init_sched_fair_class(void);
 
 extern void set_load_weight(struct task_struct *p, bool update_load);
 extern void reweight_task(struct task_struct *p, int prio);
+extern bool __dequeue_task(struct rq *rq, struct task_struct *p, int flags);
+extern void dequeue_task(struct rq *rq, struct task_struct *p, int flags);
 
 extern void resched_curr(struct rq *rq);
 extern void resched_cpu(int cpu);
