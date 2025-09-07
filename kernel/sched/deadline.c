@@ -2185,7 +2185,7 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		enqueue_pushable_dl_task(rq, p);
 }
 
-static void dequeue_task_dl(struct rq *rq, struct task_struct *p, int flags)
+static bool _dequeue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 {
 	update_curr_dl(rq);
 
@@ -2195,8 +2195,14 @@ static void dequeue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 	dequeue_dl_entity(&p->dl, flags);
 	if (!p->dl.dl_throttled && !dl_server(&p->dl))
 		dequeue_pushable_dl_task(rq, p);
+
+	return true;
 }
 
+static void dequeue_task_dl(struct rq *rq, struct task_struct *p, int flags)
+{
+	__dequeue_task_dl(rq, p, flags);
+}
 /*
  * Yield task semantic for -deadline tasks is:
  *
@@ -3176,6 +3182,9 @@ static int task_is_throttled_dl(struct task_struct *p, int cpu)
 DEFINE_SCHED_CLASS(dl) = {
 
 	.enqueue_task		= enqueue_task_dl,
+#ifndef __GENKSYMS__
+	.__dequeue_task		= _dequeue_task_dl,
+#endif
 	.dequeue_task		= dequeue_task_dl,
 	.yield_task		= yield_task_dl,
 
