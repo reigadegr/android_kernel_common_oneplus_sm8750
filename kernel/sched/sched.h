@@ -2343,6 +2343,8 @@ struct affinity_context {
 	unsigned int flags;
 };
 
+extern s64 update_curr_common(struct rq *rq);
+
 enum rq_onoff_reason {
 	RQ_ONOFF_HOTPLUG,               /* CPU is going on/offline */
 	RQ_ONOFF_TOPOLOGY,              /* sched domain topology update */
