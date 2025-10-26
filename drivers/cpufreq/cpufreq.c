@@ -821,6 +821,7 @@ ssize_t show_scaling_governor(struct cpufreq_policy *policy, char *buf)
 				policy->governor->name);
 	return -EINVAL;
 }
+EXPORT_SYMBOL_GPL(show_scaling_governor);
 
 /*
  * store_scaling_governor - store policy for the specified CPU
@@ -858,6 +859,7 @@ ssize_t store_scaling_governor(struct cpufreq_policy *policy,
 
 	return ret ? ret : count;
 }
+EXPORT_SYMBOL_GPL(store_scaling_governor);
 
 /*
  * show_scaling_driver - show the cpufreq driver currently loaded
