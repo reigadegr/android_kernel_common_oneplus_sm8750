@@ -2019,4 +2019,5 @@ config ARCH_HAS_SYSCALL_WRAPPER
 
 if 64BIT
 source "init/Kconfig.gki"
+source "init/Kconfig.gki-debug"
 endif
