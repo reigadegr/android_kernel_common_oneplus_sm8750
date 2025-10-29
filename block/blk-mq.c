@@ -33,8 +33,6 @@
 #include <trace/events/block.h>
 #include <trace/hooks/blk.h>
 
-#include <trace/hooks/blk.h>
-
 #include <linux/t10-pi.h>
 #include "blk.h"
 #include "blk-mq.h"
