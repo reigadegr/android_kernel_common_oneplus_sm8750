@@ -1367,4 +1367,5 @@ config MEMFD_ASHMEM_SHIM
 
 source "mm/damon/Kconfig"
 
+source "mm/mm_osvelte/Kconfig"
 endmenu
