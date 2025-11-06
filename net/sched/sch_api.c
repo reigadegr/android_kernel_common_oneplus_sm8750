@@ -1598,6 +1598,11 @@ replay:
 					NL_SET_ERR_MSG(extack, "Failed to find specified qdisc");
 					return -ENOENT;
 				}
+				if (p->flags & TCQ_F_INGRESS) {
+					NL_SET_ERR_MSG(extack,
+						       "Cannot add children to ingress/clsact qdisc");
+					return -EOPNOTSUPP;
+				}
 				q = qdisc_leaf(p, clid, extack);
 				if (IS_ERR(q))
 					return PTR_ERR(q);
