@@ -8967,7 +8967,7 @@ static void yield_task_fair(struct rq *rq)
 	 */
 	update_curr(cfs_rq);
 #ifdef CONFIG_SCHED_BORE
-	restart_burst_rescale_deadline_bore(curr);
+	restart_burst_rescale_deadline_bore(rq_curr);
 	if (unlikely(rq->nr_running == 1))
 		return;
 
