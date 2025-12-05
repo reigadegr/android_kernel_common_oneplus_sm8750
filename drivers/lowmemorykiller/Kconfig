@@ -1,0 +1,21 @@
+menu "XRING LMK"
+
+config XRING_LMK
+        tristate "XRING LMK MODULE"
+        default y
+        help
+          Choose this option to enable xring lowmemorykiller.
+          When the system enters a low memory scenario or user mode
+          actively triggers recycling, this module will be called to
+          kill the process.
+
+config XRING_LMK_MULIT_KILL
+        bool "XRING LMK MULIT KILL ENABLE"
+        depends on XRING_LMK
+        help
+          Choose this option to enable xring lowmemorykiller mulit killer.
+          After turning on this function, each killing process will be checked
+          and killed according to the multi-kill configuration issued by the user.
+          The relevant configurations include the number of killing processes, timeout delay, etc.
+
+endmenu
