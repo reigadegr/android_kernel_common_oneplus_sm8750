@@ -200,3 +200,4 @@ obj-$(CONFIG_CDX_BUS)		+= cdx/
 
 obj-$(CONFIG_S390)		+= s390/
 obj-$(CONFIG_CPU_QOS_ARBITER)   += freq_qos_arbiter/
+obj-$(CONFIG_XRING_LMK) += lowmemorykiller/
