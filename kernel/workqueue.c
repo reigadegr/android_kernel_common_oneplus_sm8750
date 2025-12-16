@@ -5769,8 +5769,13 @@ void freeze_workqueues_begin(void)
 
 	list_for_each_entry(wq, &workqueues, list) {
 		mutex_lock(&wq->mutex);
-		for_each_pwq(pwq, wq)
+		for_each_pwq(pwq, wq) {
+			if (WARN_ON(!virt_addr_valid(pwq))) {
+				pr_err("freeze_workqueues_begin: pwq=%px is invalid\n", pwq);
+				continue;
+			}
 			pwq_adjust_max_active(pwq);
+		}
 		mutex_unlock(&wq->mutex);
 	}
 
