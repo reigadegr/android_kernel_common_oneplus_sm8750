@@ -917,10 +917,21 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	tcm->tcm_family = AF_UNSPEC;
 	tcm->tcm__pad1 = 0;
 	tcm->tcm__pad2 = 0;
+
+	if (WARN_ON(!virt_addr_valid(q))) {
+		pr_err("tc_fill_qdisc: q=%px is invalid\n", q);
+		goto out_nlmsg_trim;
+	}
 	tcm->tcm_ifindex = qdisc_dev(q)->ifindex;
 	tcm->tcm_parent = clid;
 	tcm->tcm_handle = q->handle;
 	tcm->tcm_info = refcount_read(&q->refcnt);
+
+	if (unlikely(!q->ops)) {
+		pr_err("tc_fill_qdisc: q->ops is NULL\n");
+		goto out_nlmsg_trim;
+    }
+
 	if (nla_put_string(skb, TCA_KIND, q->ops->id))
 		goto nla_put_failure;
 	if (q->ops->ingress_block_get) {
