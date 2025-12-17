@@ -35,3 +35,4 @@ obj-y += build_utility.o
 obj-y += bore.o
 obj-$(CONFIG_ANDROID_VENDOR_HOOKS) += vendor_hooks.o
 obj-$(CONFIG_SCHED_WALT) += walt/
+obj-$(CONFIG_OPLUS_FEATURE_GKI_CPUFREQ_BOUNCING)     += cpufreq_bouncing/
