@@ -1,2 +1,3 @@
 # SPDX-License-Identifier: GPL-2.0-only
 source "kernel/sched/walt/Kconfig"
+source "kernel/sched/cpufreq_bouncing/Kconfig"
