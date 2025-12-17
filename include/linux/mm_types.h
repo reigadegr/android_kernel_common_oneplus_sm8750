@@ -1012,7 +1012,6 @@ struct mm_struct {
 		} lru_gen;
 #endif /* CONFIG_LRU_GEN */
 
-		struct task_dma_buf_info *dmabuf_info;
 		ANDROID_KABI_RESERVE(1);
 		ANDROID_BACKPORT_RESERVE(1);
 	} __randomize_layout;
