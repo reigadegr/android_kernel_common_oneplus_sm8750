@@ -570,6 +570,7 @@ struct binder_thread {
 	/* UAF protection flag */
 #ifndef __GENKSYMS__
 	u8 dead;
+	struct list_head death_node;
 #endif
 };
 

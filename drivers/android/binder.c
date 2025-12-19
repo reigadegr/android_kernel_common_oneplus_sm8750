@@ -87,6 +87,12 @@ static DEFINE_MUTEX(binder_procs_lock);
 static HLIST_HEAD(binder_dead_nodes);
 static DEFINE_SPINLOCK(binder_dead_nodes_lock);
 
+/* Delayed reaping of dead threads */
+static LIST_HEAD(binder_dead_threads);
+static DEFINE_SPINLOCK(binder_dead_lock);
+static void binder_reap_dead_threads(struct work_struct *work);
+static DECLARE_DELAYED_WORK(binder_reap_dwork, binder_reap_dead_threads);
+
 static struct dentry *binder_debugfs_dir_entry_root;
 static struct dentry *binder_debugfs_dir_entry_proc;
 static atomic_t binder_last_id;
@@ -5522,7 +5528,13 @@ static int binder_thread_release(struct binder_proc *proc,
 	struct binder_transaction *last_t = NULL;
 
 	binder_inner_proc_lock(thread->proc);
+	/* 标记死亡 + 挂到全局尸体链表，1 秒后统一火化 */
 	thread->dead = true;
+	spin_lock(&binder_dead_lock);
+	list_add(&thread->death_node, &binder_dead_threads);
+	spin_unlock(&binder_dead_lock);
+	schedule_delayed_work(&binder_reap_dwork, HZ);
+
 	/*
 	 * take a ref on the proc so it survives
 	 * after we remove this thread from proc->threads.
@@ -5604,6 +5616,21 @@ static int binder_thread_release(struct binder_proc *proc,
 	binder_thread_dec_tmpref(thread);
 	return active_transactions;
 }
+
+/* 延迟收割：真正的 kfree 放到这里 */
+static void binder_reap_dead_threads(struct work_struct *w)
+{
+	LIST_HEAD(tmp);
+	struct binder_thread *thread, *n;
+
+	spin_lock(&binder_dead_lock);
+	list_splice_init(&binder_dead_threads, &tmp);
+	spin_unlock(&binder_dead_lock);
+
+	list_for_each_entry_safe(thread, n, &tmp, death_node)
+		kfree(thread);
+}
+
 
 static __poll_t binder_poll(struct file *filp,
 				struct poll_table_struct *wait)
