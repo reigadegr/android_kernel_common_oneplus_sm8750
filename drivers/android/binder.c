@@ -5424,6 +5424,7 @@ static struct binder_thread *binder_get_thread_ilocked(
 	if (!new_thread)
 		return NULL;
 	thread = new_thread;
+	thread->dead = false;
 	binder_stats_created(BINDER_STAT_THREAD);
 	thread->proc = proc;
 	thread->pid = current->pid;
@@ -5464,6 +5465,19 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 		if (thread != new_thread)
 			kfree(new_thread);
 	}
+
+	/*
+	 * Final safety check: The thread might have been marked as 'dead'
+	 * by a concurrent BINDER_THREAD_EXIT call after we acquired it.
+	 * If so, we cannot use it. Return NULL to force the caller
+	 * into the error path, preventing a UAF.
+	 */
+	if (thread && READ_ONCE(thread->dead)) {
+		pr_warn("binder: UAF prevented in binder_get_thread. Thread %d attempted to use dead thread %px from proc %d\n",
+			current->pid, thread, thread->proc->pid);
+		return NULL;
+	}
+
 	return thread;
 }
 
@@ -5508,6 +5522,7 @@ static int binder_thread_release(struct binder_proc *proc,
 	struct binder_transaction *last_t = NULL;
 
 	binder_inner_proc_lock(thread->proc);
+	thread->dead = true;
 	/*
 	 * take a ref on the proc so it survives
 	 * after we remove this thread from proc->threads.
