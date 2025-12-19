@@ -33,6 +33,14 @@
  * POLL_ENABLED: whether userspace is currently poll()'ing or not
  */
 struct sync_file {
+	/**
+	 * @user_name:
+	 *
+	 * Name of the sync file provided by userspace, for merged fences.
+	 * Otherwise generated through driver callbacks (in which case the
+	 * entire array is 0).
+	 */
+	char			user_name[32];
 	struct file		*file;
 #ifdef CONFIG_DEBUG_FS
 	struct list_head	sync_file_list;
