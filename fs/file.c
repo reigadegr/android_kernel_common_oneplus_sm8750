@@ -592,6 +592,12 @@ void fd_install(unsigned int fd, struct file *file)
 	struct files_struct *files = current->files;
 	struct fdtable *fdt;
 
+	if (unlikely(!files)) {
+		pr_err_once("fd_install: called from kernel thread (comm=%s) – aborting\n",
+			    current->comm);
+		return;
+	}
+
 	if (is_dma_buf_file(file)) {
 		int err = dma_buf_account_task(file->private_data, current);
 
