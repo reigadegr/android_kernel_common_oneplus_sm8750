@@ -127,6 +127,9 @@ struct Qdisc {
 	struct llist_head	defer_list;
 #endif
 
+#ifndef __GENKSYMS__
+	bool			dead;
+#endif
 	spinlock_t		seqlock;
 
 	struct rcu_head		rcu;
