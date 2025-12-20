@@ -5480,6 +5480,17 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 		return NULL;
 	}
 
+	/* 二次确认：这个 thread 还在 proc->threads 里吗？
+	 * 如果已经被 rb_erase()（并发 THREAD_EXIT），就不应该再被使用，
+	 * 直接返回 NULL，让 caller 走错误路径。
+	 */
+	if (thread) {
+		binder_inner_proc_lock(proc);
+		if (RB_EMPTY_NODE(&thread->rb_node))   /* 已被 rb_erase */
+			thread = NULL;
+		binder_inner_proc_unlock(proc);   /* ← 这里应该是 unlock */
+	}
+
 	return thread;
 }
 
