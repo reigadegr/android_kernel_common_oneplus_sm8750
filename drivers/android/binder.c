@@ -5464,6 +5464,17 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 		if (thread != new_thread)
 			kfree(new_thread);
 	}
+
+	/* 把“判死 + 判脱离”一次性包在 proc->inner_lock 里，杜绝 UAF */
+	if (thread) {
+		binder_inner_proc_lock(proc);
+		if (thread->is_dead || RB_EMPTY_NODE(&thread->rb_node)) {
+			thread = NULL;
+			pr_warn("binder: attempted to use dead thread");
+		}
+		binder_inner_proc_unlock(proc);
+	}
+
 	return thread;
 }
 
