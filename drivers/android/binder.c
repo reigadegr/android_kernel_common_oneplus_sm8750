@@ -5473,6 +5473,13 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 		if (thread != new_thread)
 			kfree(new_thread);
 	}
+
+	/* 并发 BINDER_THREAD_EXIT 可能已经置位，直接返回 NULL 强制走错误路径 */
+	if (thread && READ_ONCE(thread->is_dead)) {
+		pr_warn("binder: attempted to use dead thread");
+		return NULL;
+	}
+
 	return thread;
 }
 
