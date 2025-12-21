@@ -1083,7 +1083,6 @@ void qdisc_destroy(struct Qdisc *qdisc)
 	if (qdisc->flags & TCQ_F_BUILTIN)
 		return;
 
-	qdisc->dead = true;
 	__qdisc_destroy(qdisc);
 }
 
