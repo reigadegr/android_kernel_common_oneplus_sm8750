@@ -909,6 +909,16 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	u32 block_index;
 	__u32 qlen;
 
+	/* --- 最后一道闸：拒收尸体 ----------------------------- */
+	rcu_read_lock();
+	if (unlikely(!refcount_read(&q->refcnt) || !q->ops)) {
+		pr_warn("tc_fill_qdisc: refusing to dump destroyed qdisc\n");
+		rcu_read_unlock();
+		return -1;
+	}
+	rcu_read_unlock();
+	/* ------------------------------------------------------ */
+
 	cond_resched();
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*tcm), flags);
 	if (!nlh)
