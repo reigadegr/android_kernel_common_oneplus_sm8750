@@ -1013,30 +1013,59 @@ static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			struct netlink_ext_ack *extack)
 {
 	struct sk_buff *skb;
+	int err = -EINVAL;
+	bool skb_consumed = false;
 	u32 portid = oskb ? NETLINK_CB(oskb).portid : 0;
 
 	skb = alloc_skb(NLMSG_GOODSIZE, GFP_KERNEL);
 	if (!skb)
 		return -ENOBUFS;
 
+	/*
+	 * 增加引用计数，确保在 tc_fill_qdisc 执行期间 qdisc 不会被销毁。
+	 * 如果 tryget 失败，说明 qdisc 正在被销毁，我们将其视为 NULL。
+	 */
+	if (old && !refcount_inc_not_zero(&old->refcnt)) {
+		old = NULL;
+	}
+
+	if (new && !refcount_inc_not_zero(&new->refcnt)) {
+		new = NULL;
+	}
+
 	if (old && !tc_qdisc_dump_ignore(old, false)) {
 		if (tc_fill_qdisc(skb, old, clid, portid, n->nlmsg_seq,
 				  0, RTM_DELQDISC, extack) < 0)
-			goto err_out;
+			goto out;
 	}
 	if (new && !tc_qdisc_dump_ignore(new, false)) {
 		if (tc_fill_qdisc(skb, new, clid, portid, n->nlmsg_seq,
 				  old ? NLM_F_REPLACE : 0, RTM_NEWQDISC, extack) < 0)
-			goto err_out;
+			goto out;
 	}
 
-	if (skb->len)
-		return rtnetlink_send(skb, net, portid, RTNLGRP_TC,
-				      n->nlmsg_flags & NLM_F_ECHO);
+	if (skb->len) {
+		err = rtnetlink_send(skb, net, portid, RTNLGRP_TC,
+				     n->nlmsg_flags & NLM_F_ECHO);
+		/* 只有当 skb 被成功发送后，才标记为已消费 */
+		if (err >= 0)
+			skb_consumed = true;
+	} else {
+		/* 没有内容需要发送，但操作本身是成功的 */
+		err = 0;
+	}
 
-err_out:
-	kfree_skb(skb);
-	return -EINVAL;
+out:
+	/* 释放我们增加的引用计数 */
+	if (old)
+		qdisc_put(old);
+	if (new)
+		qdisc_put(new);
+ 
+	if (!skb_consumed)
+		kfree_skb(skb);
+
+	return err;
 }
 
 static void notify_and_destroy(struct net *net, struct sk_buff *skb,
