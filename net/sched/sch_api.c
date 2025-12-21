@@ -909,15 +909,9 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	u32 block_index;
 	__u32 qlen;
 
-	/* --- 最后一道闸：拒收尸体 ----------------------------- */
-	rcu_read_lock();
-	if (unlikely(!refcount_read(&q->refcnt) || !q->ops)) {
-		pr_warn("tc_fill_qdisc: refusing to dump destroyed qdisc\n");
-		rcu_read_unlock();
-		return -1;
-	}
-	rcu_read_unlock();
-	/* ------------------------------------------------------ */
+	/* 获取后使用：引用计数为 0 或地址无效立即返回 */
+	if (unlikely(!virt_addr_valid(q) || !refcount_inc_not_zero(&q->refcnt)))
+		return -EINVAL;
 
 	cond_resched();
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*tcm), flags);
@@ -981,11 +975,13 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 
 	nlh->nlmsg_len = skb_tail_pointer(skb) - b;
 
+	qdisc_put(q);
 	return skb->len;
 
 out_nlmsg_trim:
 nla_put_failure:
 	nlmsg_trim(skb, b);
+	qdisc_put(q);
 	return -1;
 }
 
@@ -1005,11 +1001,22 @@ static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			struct netlink_ext_ack *extack)
 {
 	struct sk_buff *skb;
+	int err = 0;
+	bool skb_consumed = false;
 	u32 portid = oskb ? NETLINK_CB(oskb).portid : 0;
 
 	skb = alloc_skb(NLMSG_GOODSIZE, GFP_KERNEL);
 	if (!skb)
 		return -ENOBUFS;
+
+	/*
+	 * 在将 qdisc 传递给 tc_fill_qdisc 之前，增加其引用计数。
+	 * 如果引用计数为0，说明 qdisc 正在被销毁，我们将其视为 NULL。
+	 */
+	if (old && !refcount_inc_not_zero(&old->refcnt))
+		old = NULL;
+	if (new && !refcount_inc_not_zero(&new->refcnt))
+		new = NULL;
 
 	if (old && !tc_qdisc_dump_ignore(old, false)) {
 		if (tc_fill_qdisc(skb, old, clid, portid, n->nlmsg_seq,
@@ -1022,13 +1029,21 @@ static int qdisc_notify(struct net *net, struct sk_buff *oskb,
 			goto err_out;
 	}
 
-	if (skb->len)
-		return rtnetlink_send(skb, net, portid, RTNLGRP_TC,
-				      n->nlmsg_flags & NLM_F_ECHO);
+	if (skb->len) {
+		err = rtnetlink_send(skb, net, portid, RTNLGRP_TC,
+				     n->nlmsg_flags & NLM_F_ECHO);
+		if (err >= 0)
+			skb_consumed = true;
+	}
 
 err_out:
-	kfree_skb(skb);
-	return -EINVAL;
+	if (old)
+		qdisc_put(old);
+	if (new)
+		qdisc_put(new);
+	if (!skb_consumed)
+		kfree_skb(skb);
+	return err;
 }
 
 static void notify_and_destroy(struct net *net, struct sk_buff *skb,
