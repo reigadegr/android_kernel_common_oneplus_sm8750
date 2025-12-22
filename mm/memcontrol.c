@@ -311,6 +311,7 @@ static void obj_cgroup_release(struct percpu_ref *ref)
 	list_del(&objcg->list);
 	spin_unlock_irqrestore(&objcg_lock, flags);
 
+	percpu_ref_kill(ref);
 	percpu_ref_exit(ref);
 	kfree_rcu(objcg, rcu);
 }
@@ -3410,12 +3411,18 @@ static void refill_obj_stock(struct obj_cgroup *objcg, unsigned int nr_bytes,
 	unsigned long flags;
 	unsigned int nr_pages = 0;
 
+	/* 1. RCU 读侧临界区 + 原子获取引用；失败说明对象已死，直接放弃 */
+	rcu_read_lock();
+	if (!percpu_ref_tryget_live(&objcg->refcnt)) {
+		rcu_read_unlock();
+		return;
+	}
+
 	local_lock_irqsave(&memcg_stock.stock_lock, flags);
 
 	stock = this_cpu_ptr(&memcg_stock);
 	if (READ_ONCE(stock->cached_objcg) != objcg) { /* reset if necessary */
 		old = drain_obj_stock(stock);
-		obj_cgroup_get(objcg);
 		WRITE_ONCE(stock->cached_objcg, objcg);
 		stock->nr_bytes = atomic_read(&objcg->nr_charged_bytes)
 				? atomic_xchg(&objcg->nr_charged_bytes, 0) : 0;
@@ -3430,6 +3437,10 @@ static void refill_obj_stock(struct obj_cgroup *objcg, unsigned int nr_bytes,
 
 	local_unlock_irqrestore(&memcg_stock.stock_lock, flags);
 	obj_cgroup_put(old);
+
+	/* 2. 与第 1 步配对，释放本次函数多拿的那次引用 */
+	percpu_ref_put(&objcg->refcnt);
+	rcu_read_unlock();
 
 	if (nr_pages)
 		obj_cgroup_uncharge_pages(objcg, nr_pages);
