@@ -317,7 +317,6 @@ static void obj_cgroup_release(struct percpu_ref *ref)
 	spin_unlock_irqrestore(&objcg_lock, flags);
 
 	percpu_ref_exit(ref);
-	drain_obj_stock_all_cpus(objcg);
 	kfree_rcu(objcg, rcu);
 }
 
@@ -3392,36 +3391,6 @@ static struct obj_cgroup *drain_obj_stock(struct memcg_stock_pcp *stock)
 	return old;
 }
 
-/*
- * drain_obj_stock_all_cpus - drain percpu objcg stock on all CPUs
- * @objcg: target obj_cgroup to drain
- *
- * This function iterates through all possible CPUs and drains the
- * percpu stock if it contains the specified obj_cgroup. This is
- * called before obj_cgroup is freed to prevent use-after-free.
- */
-void drain_obj_stock_all_cpus(struct obj_cgroup *objcg)
-{
-	int cpu;
-	unsigned long flags;
-	struct memcg_stock_pcp *stock;
-	struct obj_cgroup *old;
-
-	for_each_possible_cpu(cpu) {
-		stock = per_cpu_ptr(&memcg_stock, cpu);
-
-		local_lock_irqsave(&memcg_stock.stock_lock, flags);
-		if (READ_ONCE(stock->cached_objcg) == objcg) {
-			old = drain_obj_stock(stock);
-			local_unlock_irqrestore(&memcg_stock.stock_lock, flags);
-			if (old)
-				obj_cgroup_put(old);
-		} else
-			local_unlock_irqrestore(&memcg_stock.stock_lock, flags);
-	}
-}
-EXPORT_SYMBOL_GPL(drain_obj_stock_all_cpus);
-
 static bool obj_stock_flush_required(struct memcg_stock_pcp *stock,
 				     struct mem_cgroup *root_memcg)
 {
@@ -3444,12 +3413,6 @@ static void refill_obj_stock(struct obj_cgroup *objcg, unsigned int nr_bytes,
 	struct obj_cgroup *old = NULL;
 	unsigned long flags;
 	unsigned int nr_pages = 0;
-
-	if (unlikely(percpu_ref_is_dying(&objcg->refcnt))) {
-		pr_warn("refill_obj_stock: objcg %p is dying, caller %pS\n", 
-				objcg, __builtin_return_address(0));
-		return;
-	}
 
 	local_lock_irqsave(&memcg_stock.stock_lock, flags);
 
