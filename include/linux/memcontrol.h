@@ -1943,6 +1943,4 @@ static inline void obj_cgroup_uncharge_zswap(struct obj_cgroup *objcg,
 }
 #endif
 
-void drain_obj_stock_all_cpus(struct obj_cgroup *objcg);
-
 #endif /* _LINUX_MEMCONTROL_H */
