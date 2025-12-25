@@ -47,7 +47,6 @@
 #include <linux/moduleparam.h>
 #include <linux/pkeys.h>
 #include <linux/oom.h>
-#include <linux/ksm.h>
 #include <linux/sched/mm.h>
 #include <linux/ksm.h>
 
@@ -148,7 +147,6 @@ static void remove_vma(struct vm_area_struct *vma, bool unreachable)
 	if (vma->vm_file)
 		fput(vma->vm_file);
 	mpol_put(vma_policy(vma));
-	uksm_remove_vma(vma, "remove_vma");
 	if (unreachable)
 		__vm_area_free(vma);
 	else
@@ -448,6 +446,7 @@ static inline void init_multi_vma_prep(struct vma_prepare *vp,
 	vp->file = vma->vm_file;
 	if (vp->file)
 		vp->mapping = vma->vm_file->f_mapping;
+
 }
 
 /*
@@ -568,7 +567,6 @@ again:
 		mpol_put(vma_policy(vp->remove));
 		if (!vp->remove2)
 			WARN_ON_ONCE(vp->vma->vm_end < vp->remove->vm_end);
-		uksm_remove_vma(vp->remove, "vma_complete");
 		vm_area_free(vp->remove);
 
 		/*
@@ -643,7 +641,6 @@ int vma_expand(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	struct vma_prepare vp;
 
 	vma_start_write(vma);
-
 	if (next && (vma != next) && (end == next->vm_end)) {
 		int ret;
 
@@ -668,12 +665,10 @@ int vma_expand(struct vma_iterator *vmi, struct vm_area_struct *vma,
 
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, start, end, 0);
-	uksm_remove_vma(vma, "vma_expand");
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
 	vma_iter_store(vmi, vma);
-	uksm_add_vma_new(vma, "vma_expand");
 
 	vma_complete(&vp, vmi, vma->vm_mm);
 	return 0;
@@ -708,7 +703,6 @@ int vma_shrink(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	if (vma_iter_prealloc(vmi, NULL))
 		return -ENOMEM;
 
-	uksm_remove_vma(vma, "vma_shrink");
 	vma_start_write(vma);
 
 	init_vma_prep(&vp, vma);
@@ -720,8 +714,6 @@ int vma_shrink(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
 	vma_complete(&vp, vmi, vma->vm_mm);
-
-	uksm_add_vma_new(vma, "vma_shrink");
 	return 0;
 }
 
@@ -1030,7 +1022,6 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, vma_start, vma_end, adj_start);
-	uksm_remove_vma(vma, "vma_merge_1");
 
 	vma->vm_start = vma_start;
 	vma->vm_end = vma_end;
@@ -1038,13 +1029,10 @@ struct vm_area_struct *vma_merge(struct vma_iterator *vmi, struct mm_struct *mm,
 
 	if (vma_expanded)
 		vma_iter_store(vmi, vma);
-	uksm_add_vma_new(vma, "vma_merge_1");
 
 	if (adj_start) {
-		uksm_remove_vma(adjust, "vma_merge 2");
 		adjust->vm_start += adj_start;
 		adjust->vm_pgoff += adj_start >> PAGE_SHIFT;
-		uksm_add_vma_new(adjust, "vma_merge 2");
 		if (adj_start < 0) {
 			WARN_ON(vma_expanded);
 			vma_iter_store(vmi, next);
@@ -1306,8 +1294,6 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	 */
 	vm_flags |= calc_vm_prot_bits(prot, pkey) | calc_vm_flag_bits(file, flags) |
 			mm->def_flags | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
-	/* If uksm is enabled, we add VM_MERGEABLE to new VMAs. */
-	uksm_vm_flags_mod(&vm_flags);
 
 	if (flags & MAP_LOCKED)
 		if (!can_do_mlock())
@@ -2445,7 +2431,6 @@ int __split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	vma_prepare(&vp);
 	vma_adjust_trans_huge(vma, vma->vm_start, addr, 0);
 
-	uksm_remove_vma(vma, "__split_vma");
 	if (new_below) {
 		vma->vm_start = addr;
 		vma->vm_pgoff += (addr - new->vm_start) >> PAGE_SHIFT;
@@ -2455,8 +2440,6 @@ int __split_vma(struct vma_iterator *vmi, struct vm_area_struct *vma,
 
 	/* vma_complete stores the new vma */
 	vma_complete(&vp, vmi, vma->vm_mm);
-	uksm_add_vma_new(vma, "__split_vma_1 vma");
-	uksm_add_vma_new(new, "__split_vma_2 new");
 
 	/* Success. */
 	if (new_below)
@@ -2900,7 +2883,6 @@ cannot_expand:
 	/* Lock the VMA since it is modified after insertion into VMA tree */
 	vma_start_write(vma);
 	vma_iter_store(&vmi, vma);
-	uksm_add_vma_new(vma, "mmap_region");
 	mm->map_count++;
 	if (vma->vm_file) {
 		i_mmap_lock_write(vma->vm_file->f_mapping);
@@ -2973,7 +2955,6 @@ unmap_and_free_vma:
 	if (file && (vm_flags & VM_SHARED))
 		mapping_unmap_writable(file->f_mapping);
 free_vma:
-	uksm_remove_vma(vma, "mmap_region");
 	vm_area_free(vma);
 unacct_error:
 	if (charged)
@@ -3198,7 +3179,6 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	 * Note: This happens *after* clearing old mappings in some code paths.
 	 */
 	flags |= VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
-	uksm_vm_flags_mod(&flags);
 	if (!may_expand_vm(mm, flags, len >> PAGE_SHIFT))
 		return -ENOMEM;
 
@@ -3220,7 +3200,6 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 			goto unacct_fail;
 
 		vma_start_write(vma);
-		uksm_remove_vma(vma, "do_brk_flags_1");
 
 		init_vma_prep(&vp, vma);
 		vma_prepare(&vp);
@@ -3228,7 +3207,6 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 		vma->vm_end = addr + len;
 		vm_flags_set(vma, VM_SOFTDIRTY);
 		vma_iter_store(vmi, vma);
-		uksm_add_vma_new(vma, "do_brk_flags_1");
 
 		vma_complete(&vp, vmi, mm);
 		khugepaged_enter_vma(vma, flags);
@@ -3255,8 +3233,6 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	mm->map_count++;
 	validate_mm(mm);
 	ksm_add_vma(vma);
-	uksm_add_vma_new(vma, "do_brk_flags_2");
-
 out:
 	perf_event_mmap(vma);
 	mm->total_vm += len >> PAGE_SHIFT;
@@ -3391,7 +3367,6 @@ void exit_mmap(struct mm_struct *mm)
 	trace_exit_mmap(mm);
 destroy:
 	__mt_destroy(&mm->mm_mt);
-
 	mmap_write_unlock(mm);
 	vm_unacct_memory(nr_accounted);
 }
@@ -3508,7 +3483,6 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 		if (vma_link(mm, new_vma))
 			goto out_vma_link;
 		*need_rmap_locks = false;
-		uksm_add_vma_new(new_vma, "copy_vma");
 	}
 	return new_vma;
 
@@ -3681,7 +3655,6 @@ static struct vm_area_struct *__install_special_mapping(
 	vm_stat_account(mm, vma->vm_flags, len >> PAGE_SHIFT);
 
 	perf_event_mmap(vma);
-	uksm_add_vma_new(vma, "__install_special_mapping");
 
 	return vma;
 
