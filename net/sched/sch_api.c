@@ -923,6 +923,9 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 	u32 block_index;
 	__u32 qlen;
 
+	if (!refcount_inc_not_zero(&q->refcnt))
+		return -1;
+
 	cond_resched();
 	nlh = nlmsg_put(skb, portid, seq, event, sizeof(*tcm), flags);
 	if (!nlh)
@@ -985,11 +988,13 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 
 	nlh->nlmsg_len = skb_tail_pointer(skb) - b;
 
+	qdisc_put(q);
 	return skb->len;
 
 out_nlmsg_trim:
 nla_put_failure:
 	nlmsg_trim(skb, b);
+	qdisc_put(q);
 	return -1;
 }
 
